@@ -1,0 +1,66 @@
+#!/home/ingeniosus/.local/share/virtualenvs/lazy_chat_bot-adR9px7y/bin/python
+
+import sys
+import os
+import requests
+
+api_key = os.getenv("tg_api_lazy_bot")
+
+def main():
+    try:
+        if sys.argv[1] in ("help", "-h", "--h", "--help"):
+            print("Send message via terminal, tgsend message 'message'")
+            exit()
+
+        chat_id = os.getenv(sys.argv[2])
+
+        if sys.argv[2] not in ("message", "m", "doc", "d"):
+            print("second argument error")
+            exit()
+
+        if sys.argv[2] in ("message", "m"):
+            message_handler(sys.argv[1], sys.argv[3])
+            exit()
+
+        if sys.argv[2] in ("doc", "d"):
+            documents_handler(sys.argv[1], sys.argv[3])
+            exit()
+
+        else:
+            print("some shit heppens")
+            exit()
+
+    except IndexError:
+        print("Amount of arguments error")
+        exit()
+
+def message_handler(recipient, text_message):
+    url = f"https://api.telegram.org/bot{api_key}/sendMessage?chat_id={recipient}&text={text_message}"
+    res = requests.get(url).json()
+
+    if res["ok"] == True:
+        print("sent")
+    else:
+        print("something went wrong")
+
+def documents_handler(recipient, document):
+    url = f"https://api.telegram.org/bot{api_key}/sendDocument?chat_id={recipient}"
+
+    if not os.path.exists(document):
+        print("file not found error")
+        exit()
+
+    files = {"document": open(document)}
+
+    res = requests.post(url, files = files)
+
+    if res.json()["ok"] == False:
+        print("something get wrong")
+    elif res.json()["ok"] == True:
+        print("sent")
+    else:
+        print("something went wrong")
+
+
+if __name__ == "__main__":
+    main()
