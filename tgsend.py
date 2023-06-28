@@ -14,6 +14,7 @@ import json
 
 import requests
 
+
 # -------------------------------------------------------- classes --------------------------------------------------------- #
 
 # donno how it works in other shells, so be careful about it, I dont dive a fuck
@@ -38,6 +39,7 @@ class ColorString:
         color_code = self.COLORS.get(self.color, self.COLORS["cyan"])
         return f"{color_code}{self.text}{self.END_COLOR}"
 
+
 # ----------------------------------------------------- default values ----------------------------------------------------- #
 
 contacts_file_name = ".tgsend.contacts"
@@ -48,15 +50,8 @@ contacts_file_path = os.path.join(current_file_dir, contacts_file_name)
 
 contacts_file_exists = os.path.exists(contacts_file_path)
 
+
 # ------------------------------------------------------- functions -------------------------------------------------------- #
-
- ###############################################################
- ##                                                           ##
- ##  Here is main function of this script, simply import it,  ##
- ##  if you want to send message or/and backup some file.     ##
- ##                                                           ##
- ###############################################################
-
 
 def message_handler(api_key = None, chat_id = None, messages = None, documents = None, audiofiles = None):
 
@@ -65,26 +60,30 @@ def message_handler(api_key = None, chat_id = None, messages = None, documents =
 
     api_key - telegram bot's API key
 
-    chat_id - chat associated with bot
+    chat_id - chat associated with the bot
 
     messages - list of messages
+    ["message1", "message2"]
 
     documents - list of files' paths
 
     audiofiles - list of audiofiles' paths
+    (the audiofile can be sent as a regular file, but the user will not be able to play it in a telegram then)
 
-    (messages, or/and documents, or/and audiofiles)
     """
+
 
     if (api_key == None) or (chat_id == None):
         print(ColorString(color = "red", text = "bot's API key and chat id are required"))
         return
+
 
     all_tries = (0 if messages is None else len(messages)) + (0 if documents is None else len(documents))  + (0 if audiofiles is None else len(audiofiles))
 
     if (all_tries == 0):
         print(ColorString(color = "red", text = "At least one argument for sending is required"))
         return
+
 
     sending_success = []
 
@@ -145,7 +144,7 @@ def message_handler(api_key = None, chat_id = None, messages = None, documents =
                 sending_errors.append(f"{doc}:\n\t{description}")
 
             else:
-                print(ColorString(color = "cian", text = f"some unexpected problem with file \"{doc}\""))
+                print(ColorString(color = "cian", text = f"some unexpected problem with file: \"{doc}\""))
 
     if audiofiles is not None:
 
@@ -179,9 +178,6 @@ def message_handler(api_key = None, chat_id = None, messages = None, documents =
 
             else:
                 print(ColorString(color = "cian", text = f"some unexpected problem with file \"{audio}\""))
-
-
-
 
 
     if (all_tries != 0) and (all_tries == len(sending_success)):
