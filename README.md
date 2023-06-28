@@ -33,7 +33,7 @@ How to setup tgsend
 8) get chat id using tgsend getid, store it in your environment (contacts file editor will be added, probably soon)
 
 Now you can send using:
-  tgsend send -T chat_id -m messages -d documents
+  tgsend send [-h] [-A <API-key>] (-T <chat id> | -t <chat name>) [-m message [message ...]] [-d file [file ...]] [-a audiofile [audiofile ...]
  
 
 ![Screenshot 2023-03-30 05 05 22](https://user-images.githubusercontent.com/97762325/228718569-cf91b04f-ae99-45cd-9c61-c9e33c87153c.png)
