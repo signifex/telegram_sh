@@ -21,8 +21,7 @@ How to setup tgsend
 
 3) chmod +x tgsend.py
 
-4) create simbolic link to $PATH
-
+4) add link to file in your bin folde
 
 5) get api-key from BotFather
 
@@ -32,9 +31,15 @@ How to setup tgsend
 
 8) get chat id using tgsend getid, store it in your environment (contacts file editor will be added, probably soon)
 
-Now you can send using:
-  tgsend send [-h] [-A <API-key>] (-T <chat id> | -t <chat name>) [-m message [message ...]] [-d file [file ...]] [-a audiofile [audiofile ...]
- 
+Usage:
+
+  tgsend send [-h] [-A \<API-key\>] (-T \<chat id\> | -t \<chat name\>) [-m message [message ...]] [-d file [file ...]] [-a audiofile [audiofile ...]
+
+Or:
+
+  from tgsend import message_handler
+  
+  message_handler(api_key = \<API-key\>, chat_id = \<chat id\>, messages = ["message", "message])
 
 ![Screenshot 2023-03-30 05 05 22](https://user-images.githubusercontent.com/97762325/228718569-cf91b04f-ae99-45cd-9c61-c9e33c87153c.png)
 
