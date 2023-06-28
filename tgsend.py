@@ -6,7 +6,7 @@
 
 """
 
-#---------------------------------------------------- imports -----------------------------------------------------#
+# -------------------------------------------------------- imports --------------------------------------------------------- #
 
 import os
 import argparse
@@ -14,7 +14,8 @@ import json
 
 import requests
 
-#----------------------------------------------------- classes ----------------------------------------------------#
+
+# -------------------------------------------------------- classes --------------------------------------------------------- #
 
 # donno how it works in other shells, so be careful about it, I dont dive a fuck
 class ColorString:
@@ -38,8 +39,9 @@ class ColorString:
         color_code = self.COLORS.get(self.color, self.COLORS["cyan"])
         return f"{color_code}{self.text}{self.END_COLOR}"
 
-#------------------------------------------------- default values -------------------------------------------------#
- 
+
+# ----------------------------------------------------- default values ----------------------------------------------------- #
+
 contacts_file_name = ".tgsend.contacts"
 
 current_file_dir = os.path.dirname(os.path.realpath(__file__))
@@ -48,51 +50,40 @@ contacts_file_path = os.path.join(current_file_dir, contacts_file_name)
 
 contacts_file_exists = os.path.exists(contacts_file_path)
 
-if contacts_file_exists:
-    with open (contacts_file_path, "r") as con_file:
-        try:
-            data = json.load(con_file)
-            bot_api_key = data["bot_api_key"]
-            saved_contacts = data["contacts"] if (len(data["contacts"]) != 0) else None 
-        except (json.JSONDecodeError, IndexError):
-            print(ColorString(color = "yellow", text = "contacts file is corrupted"))
 
-else:
-    bot_api_key = None
+# ------------------------------------------------------- functions -------------------------------------------------------- #
 
-#----------------------------------------------------- functions --------------------------------------------------#
-
-
- #############################################################
- ## Here is main function of this script, simply import it, ##
- ## if you want to send message or/and backup some file.    ##
- #############################################################
-
-def message_handler(api_key = None, chat_id = None, messages = None, documents = None):
+def message_handler(api_key = None, chat_id = None, messages = None, documents = None, audiofiles = None):
 
     """
     massage handler takes:
 
     api_key - telegram bot's API key
 
-    chat_id - chat associated with bot
+    chat_id - chat associated with the bot
 
     messages - list of messages
+    ["message1", "message2"]
 
     documents - list of files' paths
 
-    (messages or/and documents)
+    audiofiles - list of audiofiles' paths
+    (the audiofile can be sent as a regular file, but the user will not be able to play it in a telegram then)
+
     """
+
 
     if (api_key == None) or (chat_id == None):
         print(ColorString(color = "red", text = "bot's API key and chat id are required"))
         return
 
-    all_tries = (0 if messages is None else len(messages)) + (0 if documents is None else len(documents))
-    
+
+    all_tries = (0 if messages is None else len(messages)) + (0 if documents is None else len(documents))  + (0 if audiofiles is None else len(audiofiles))
+
     if (all_tries == 0):
         print(ColorString(color = "red", text = "At least one argument for sending is required"))
         return
+
 
     sending_success = []
 
@@ -132,7 +123,7 @@ def message_handler(api_key = None, chat_id = None, messages = None, documents =
 
             if  os.path.exists(doc) and os.path.getsize(doc) < max_file_size:
 
-                response = requests.post(d_url, data = {"chat_id": chat_id}, files = {"document": open(doc)})
+                response = requests.post(d_url, data = {"chat_id": chat_id}, files = {"document": open(doc, "rb")})
 
                 if response.status_code == 200:
                     sending_success.append(doc)
@@ -147,13 +138,47 @@ def message_handler(api_key = None, chat_id = None, messages = None, documents =
             elif  os.path.exists(doc) and os.path.getsize(doc) > max_file_size:
                 description = ColorString(color = "red", text = f"file is bigger than bot's file limit, skipped")
                 sending_errors.append(f"{doc}:\n\t{description}")
-                
+
             elif not os.path.exists(doc):
                 description = ColorString(color = "red", text = f"file not found")
                 sending_errors.append(f"{doc}:\n\t{description}")
 
             else:
-                print(ColorString(color = "cian", text = f"some unexpected problem with file \"{doc}\""))
+                print(ColorString(color = "cian", text = f"some unexpected problem with file: \"{doc}\""))
+
+    if audiofiles is not None:
+
+        a_url = f"https://api.telegram.org/bot{api_key}/sendAudio"
+
+        for audio in audiofiles:
+
+            max_file_size = 50_000_000 #50 mb is max for 1 file telegram bots
+
+            if  os.path.exists(audio) and os.path.getsize(audio) < max_file_size:
+
+                response = requests.post(a_url, data = {"chat_id": chat_id}, files = {"audio": open(audio, "rb")})
+
+                if response.status_code == 200:
+                    sending_success.append(audio)
+
+                else:
+                    try:
+                        description = ColorString(color = "red", text = json.loads(response.content)["description"])
+                    except (json.JSONDecodeError, KeyError):
+                        description = response.content
+                    sending_errors.append(f"{audio}:\n\t{description}")
+
+            elif  os.path.exists(audio) and os.path.getsize(audio) > max_file_size:
+                description = ColorString(color = "red", text = f"file is bigger than bot's file limit, skipped")
+                sending_errors.append(f"{audio}:\n\t{description}")
+
+            elif not os.path.exists(audio):
+                description = ColorString(color = "red", text = f"file not found")
+                sending_errors.append(f"{audio}:\n\t{description}")
+
+            else:
+                print(ColorString(color = "cian", text = f"some unexpected problem with file \"{audio}\""))
+
 
     if (all_tries != 0) and (all_tries == len(sending_success)):
         print(ColorString(color = "green", text = "Sent successfully"))
@@ -224,12 +249,11 @@ def contacts_editor(chat_add = None, chat_remove = None):
     #             print(ColorString(color = "red", text = "contact with this name already exists"))
 
     #         else:
-            
+
     #         with open(contacts_file_path, "w") as contacts:
-                
 
     #             elif chat_remove != None:
-        
+
 def get_id(api_key = None, searching_username = None, searching_text = None):
 
     if api_key != None:
@@ -237,7 +261,7 @@ def get_id(api_key = None, searching_username = None, searching_text = None):
         try:
 
             url = f'https://api.telegram.org/bot{api_key}/getUpdates'
-        
+
             response = requests.get(url)
 
             if response.status_code == 200:
@@ -255,59 +279,63 @@ def get_id(api_key = None, searching_username = None, searching_text = None):
 
                 if searching_username != None:
 
-                    for message in reversed(messages):
-
+                    for message in messages:
                         if message["message"]["from"]["username"] == searching_username:
-
                             text = message["message"]["text"]
                             chat_id = message["message"]["chat"]["id"]
-                            result = (searching_username, chat_id, text)
+                            result = (searching_username, chta_id, text)
                             break
 
                 elif searching_text != None:
 
-                    for message in reversed(messages):
-
+                    for message in messages:
                         if message["message"]["text"] == searching_text:
-
                             username = message["message"]["from"]["username"]
                             chat_id = message["message"]["chat"]["id"]
-                            result = (username, chat_id, searching_text)
+                            result = (searching_username, chat_id, text)
                             break
-                
+
                 else:
 
                     result = []
-
-                    for message in reversed(messages):
-                        
+                    for message in messages:
                         text = message["message"]["text"]
                         username = message["message"]["from"]["username"]
                         chat_id = message["message"]["chat"]["id"]
-                        result.append(f"{username} {chat_id} {text}")
-                         
+                        result.append(f"{searching_username} {chat_id} {text}")
+
 
                 if result != None:
-                    print(*result, sep = "\n")
+                    print(*result)
 
                 else:
                     print(ColorString(color = "red", text = "nothing found"))
 
         except (json.JSONDecodeError, KeyError):
-
             print(ColorString(color = "red", text = "Some unexpected problem"))
 
     else:
         print(ColorString(color = "red", text = "API-key required"))
-        
 
-
-
-#---------------------------------------------------- main part ---------------------------------------------------#
+# ------------------------------------------------------- main part -------------------------------------------------------- #
 
 def main():
 
-    #setup parser and subparser
+    # try to read contacts file
+    if contacts_file_exists:
+        with open (contacts_file_path, "r") as con_file:
+            try:
+                data = json.load(con_file)
+                bot_api_key = data["bot_api_key"]
+                saved_contacts = data["contacts"] if (len(data["contacts"]) != 0) else None
+            except (json.JSONDecodeError, IndexError):
+                print(ColorString(color = "yellow", text = "contacts file is corrupted"))
+
+    else:
+        bot_api_key = None
+
+
+    # setup parser and subparser
     parser = argparse.ArgumentParser(description="Send message or/and document from shell to Telegram",
                                      epilog="https://github.com/signifex")
 
@@ -354,6 +382,12 @@ def main():
                                         nargs = "+",
                                         help = "send file(s) to chat")
 
+    message_handler_parser.add_argument("-a", "--audio",
+                                        metavar = "audiofile",
+                                        dest = "sending_audiofiles",
+                                        nargs = "+",
+                                        help = "send audiofile(s) to chat")
+
 
     # parser for creating contacts file, API key is optional
     creation_file_parser = subparsers.add_parser("create", help = "create contacts file")
@@ -367,7 +401,7 @@ def main():
     # parser to only show contacts list
 
     list_contacts_parser = subparsers.add_parser("list", help = "show contacts list and exit")
-   
+
     # parser for contacts file
 
     contacts_edit_parser = subparsers.add_parser("contacts", help = "edit contacts file")
@@ -446,7 +480,7 @@ def main():
         elif args.sending_chat_id != None:
             extracted_chat_id = args.sending_chat_id
 
-        message_handler(api_key = args.sending_bot_api, chat_id = extracted_chat_id, messages = args.sending_messages, documents = args.sending_documents)
+        message_handler(api_key = args.sending_bot_api, chat_id = extracted_chat_id, messages = args.sending_messages, documents = args.sending_documents, audiofiles = args.sending_audiofiles)
 
 
     else:
@@ -454,13 +488,14 @@ def main():
 
     exit()
 
-#---------------------------------------------- lets start this shit ----------------------------------------------#
+# -------------------------------------------------- lets start this shit -------------------------------------------------- #
 
 if __name__ == "__main__":
     main()
 
+# -------------------------------------------------------- old shit -------------------------------------------------------- #
 
-#----------------------------------------------------- old shit ---------------------------------------------------#
+
 # elif args.command == 'delete':
 #     url = f'https://api.telegram.org/bot{api_key}/deleteMessage'
 #     params = {
