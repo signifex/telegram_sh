@@ -17,7 +17,9 @@ import requests
 
 # -------------------------------------------------------- classes --------------------------------------------------------- #
 
+
 # donno how it works in other shells, so be careful about it, I dont dive a fuck
+
 class ColorString:
 
     COLORS = {
@@ -40,6 +42,7 @@ class ColorString:
         return f"{color_code}{self.text}{self.END_COLOR}"
 
 
+
 # ----------------------------------------------------- default values ----------------------------------------------------- #
 
 contacts_file_name = ".tgsend.contacts"
@@ -49,6 +52,8 @@ current_file_dir = os.path.dirname(os.path.realpath(__file__))
 contacts_file_path = os.path.join(current_file_dir, contacts_file_name)
 
 contacts_file_exists = os.path.exists(contacts_file_path)
+
+
 
 
 # ------------------------------------------------------- functions -------------------------------------------------------- #
@@ -200,7 +205,9 @@ def contacts_creator(api_key = None):
     if not contacts_file_exists:
 
         file_structure = {"bot_api_key" : api_key,
+                          "default_chat" : None,
                           "contacts": {}}
+
         with open(contacts_file_path, "w") as contacts:
             json.dump(file_structure, contacts)
 
@@ -323,17 +330,25 @@ def main():
 
     # try to read contacts file
     if contacts_file_exists:
-        with open (contacts_file_path, "r") as con_file:
+        with open (contacts_file_path, "r") as contacts_file:
             try:
-                data = json.load(con_file)
+                data = json.load(contacts_file)
                 bot_api_key = data["bot_api_key"]
+                default_chat = data["default_chat"]
                 saved_contacts = data["contacts"] if (len(data["contacts"]) != 0) else None
             except (json.JSONDecodeError, IndexError):
                 print(ColorString(color = "yellow", text = "contacts file is corrupted"))
 
+                bot_api_key = None
+                default_chat = None
+                saved_contacts = None
+
     else:
         bot_api_key = None
 
+        default_chat = None
+
+        saved_contacts = None
 
     # setup parser and subparser
     parser = argparse.ArgumentParser(description="Send message or/and document from shell to Telegram",
@@ -354,14 +369,7 @@ def main():
                                         default = bot_api_key,
                                         help = "bot's api key, by default will be readed from contacts file")
 
-    recipient = message_handler_parser.add_mutually_exclusive_group(required = True)
-
-    recipient.add_argument("-T", "--to_manual_chat",
-                           metavar = "<chat id>",
-                           dest = "sending_chat_id",
-                           type = int,
-                           help = "chat_id to send message")
-
+    recipient = message_handler_parser.add_mutually_exclusive_group(required = False)
 
     recipient.add_argument("-t", "--to_saved_chat",
                            metavar = "<chat name>",
@@ -370,17 +378,27 @@ def main():
                            help = "name from contacts list to send message")
 
 
+    recipient.add_argument("-T", "--to_manual_chat",
+                           metavar = "<chat id>",
+                           dest = "sending_chat_id",
+                           type = int,
+                           default = default_chat,
+                           help = "chat_id to send message")
+
+
     message_handler_parser.add_argument("-m", "--message",
                                         metavar = "message",
                                         dest = "sending_messages",
                                         nargs = "+",
                                         help = "send message(s) to chat")
 
+
     message_handler_parser.add_argument("-d", "--document",
                                         metavar = "file",
                                         dest = "sending_documents",
                                         nargs = "+",
                                         help = "send file(s) to chat")
+
 
     message_handler_parser.add_argument("-a", "--audio",
                                         metavar = "audiofile",
@@ -421,7 +439,7 @@ def main():
 
     # parser to get updates - easy way to get own chat number
 
-    get_id_parser = subparsers.add_parser("getid", help = "get updates from bot and return messages with chat id") 
+    get_id_parser = subparsers.add_parser("getid", help = "get updates from bot and return messages with chat id")
 
     get_id_parser.add_argument("-A", "--api_key",
                                metavar = "API-key",
@@ -462,25 +480,39 @@ def main():
     elif args.command == "contacts":
         contacts_editor(chat_add = args.editor_add, chat_remove = args.editor_remove)
 
+
+
     elif args.command == "send":
 
-        if args.sending_chat_name != None and contacts_file_exists:
+        extracted_chat_id = None
+
+        if (args.sending_chat_id == None and args.sending_chat_name == None):
+            print(ColorString(color = "red", text = f"missed chat name or chat id"))
+
+        if args.sending_bot_api == None:
+            print(ColorString(color = "red", text = f"missed bot's API"))
+
+        if args.sending_chat_id != None:
+            extracted_chat_id = args.sending_chat_id
+
+        elif args.sending_chat_name != None and contacts_file_exists:
 
             try:
                 extracted_chat_id = saved_contacts[args.sending_chat_name]
 
             except KeyError:
                 print(ColorString(color = "red", text = f"contact \"{args.sending_chat_name}\" not found"))
-                exit()
 
         elif args.sending_chat_name != None and not contacts_file_exists:
             print(ColorString(color = "red", text = "contact file not found"))
 
-
-        elif args.sending_chat_id != None:
-            extracted_chat_id = args.sending_chat_id
+        else:
+            print(ColorString(color = "cian", text = "some unexpected problem with extracting arguments for send subcommand"))
+            print(args)
+            exit()
 
         message_handler(api_key = args.sending_bot_api, chat_id = extracted_chat_id, messages = args.sending_messages, documents = args.sending_documents, audiofiles = args.sending_audiofiles)
+
 
 
     else:
@@ -513,5 +545,10 @@ if __name__ == "__main__":
 # delete_parser = subparsers.add_parser('delete', help='delete a message')
 # delete_parser.add_argument('--chat_id', type=int, required=True, help='Chat ID')
 # delete_parser.add_argument('--message_id',
+
+# need to repair getid function, it returns nothing, if you call it like "tgsend getid -A "some unrealistic api"".
+
+# mb re-write ColorString, but donno, probably its not a good idea, to ruin a good working class
+
 
 
