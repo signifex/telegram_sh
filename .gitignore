@@ -1,0 +1,12 @@
+# hidden files
+.*
+
+# python cache
+__pycache__/
+
+# my junk files
+out*
+draft*
+
+# folder with testing files
+examples/
