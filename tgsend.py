@@ -1,416 +1,1350 @@
 #!/usr/bin/env python3
 
-"""
+'''
+About this script:
+I wanted to create a simple script that sends messages to telegram from bash.
+But writing complex logic on the bash is such a thing.
+Therefore, I wrote in Python, and the first version generally used bare arguments instead of an argument's parser lib.
+Then I added sending docks as the first upgrade. Then I decided to add a good implementation to other scripts.
+But with all this, the script still can work on the standard library,
+and only to send documents the requests module is needed.
 
-   If you dont want to install "requests" lib globally, you can modify shebang, and provide link to python in virtual environment
+NOTE:
+ContactsFile is not really encrypted, it is simple byte exchange, to prevent direct reading.
 
-"""
+This is the third version of the script, for next one:
+
+1) I need to find out, that about groups of arguments in argparse module in  python 3.11/3.12
+
+2) mb think about real encryption of contacts file?
+   but I dont know, how to realise it using built-in libs only.
+
+3) ADD SENDING OF ALREADY OPEN DOCUMENT
+
+4) aiohttp supporting
+'''
+
 
 # -------------------------------------------------------- imports --------------------------------------------------------- #
 
 import os
+import sys
 import argparse
 import json
+import traceback
+import datetime
+import hashlib
+import logging
+import asyncio
+import urllib.request
+import urllib.parse
 
-import requests
+from typing import List, Set, Dict, Tuple, NamedTuple, Literal, Union, Iterable, BinaryIO, Optional, NoReturn
+
+try:
+    import requests
+    REQUESTS = True
+except ImportError:
+    REQUESTS = False
+
+try:
+    import aiohttp
+    AIOHTTP = True
+except ImportError:
+    AIOHTTP = False
+
+
+# ------------------------------------------------------- constants -------------------------------------------------------- #
+
+EXIT_STATUS = Literal[0, 1]
+
+FILE_KEY = 0x11
+'''
+Feel free to change the key, anyway, it is only 256 possible values,
+and provide only weak protection from direct file reading.
+If you dont want to save api-keys, you can always provide it manually, and not storing value in ContactsFile.
+Only api_key_name is required to manage contacts associated with the bot
+'''
+
+# ----------------------------------------------------- set up logger ------------------------------------------------------ #
+
+def logging_level(verbose=False):
+
+    if verbose:
+        logging.basicConfig(level=logging.DEBUG)
+
+    else:
+        logging.basicConfig(level=logging.WARNING)
 
 
 # -------------------------------------------------------- classes --------------------------------------------------------- #
 
+class Colorize:
 
-# donno how it works in other shells, so be careful about it, I dont dive a fuck
+    '''
+    Donno how it works in other shells, so be careful about it. I dont dive a fuck.
+    Actually it is a shorted version of my another module, but I want to make this script
+    as independent, as possible
+    '''
 
-class ColorString:
+    RESET_COLOR = "\033[0m"
 
     COLORS = {
-        "red": "\033[91m",
-        "green": "\033[92m",
-        "yellow": "\033[93m",
-        "blue": "\033[94m",
-        "magenta": "\033[95m",
-        "cyan": "\033[96m"
-        }
+    "black": "\033[30m",
+    "red": "\033[31m",
+    "green": "\033[32m",
+    "yellow": "\033[33m",
+    "blue": "\033[34m",
+    "magenta": "\033[35m",
+    "cyan": "\033[36m",
+    }
 
-    END_COLOR = "\033[0m"
+    STYLES = {
+        "bold": "\033[1m",
+    }
 
-    def __init__(self, color="cyan", text="default string"):
-        self.color = color
-        self.text = text
+    END_STYLES = {
+        "bold": "\033[22m",
+    }
 
-    def __str__(self):
-        color_code = self.COLORS.get(self.color, self.COLORS["cyan"])
-        return f"{color_code}{self.text}{self.END_COLOR}"
+    def __init__(self,
+                 text: str,
+                 color: Optional[str] = None,
+                 bold: Optional[bool] = False,
+                 ) -> NoReturn:
 
+        self._color = color
+        self._text = text
+        self._bold = bold
 
+    def __str__(self) -> str:
 
-# ----------------------------------------------------- default values ----------------------------------------------------- #
+        style_code = []
+        style_end = []
 
-contacts_file_name = ".tgsend.contacts"
+        if self._bold:
+            style_code.append(self.STYLES["bold"])
+            style_end.append(self.END_STYLES["bold"])
 
-current_file_dir = os.path.dirname(os.path.realpath(__file__))
+        if self._color:
+            style_code.append(self.COLORS.get(self._color, ""))
+            style_end.append(self.RESET_COLOR)
 
-contacts_file_path = os.path.join(current_file_dir, contacts_file_name)
+        return ''.join(style_code) + self._text + ''.join(reversed(style_end))
 
-contacts_file_exists = os.path.exists(contacts_file_path)
 
+class ModuleBaseException(Exception):
 
+    def __init__(self, original_exception, additional: Optional[str] = None):
+        super().__init__(str(original_exception))
 
+        logging.info(f"{str(self)}")
 
-# ------------------------------------------------------- functions -------------------------------------------------------- #
+        if additional:
+            logging.info(additional)
 
-def message_handler(api_key = None, chat_id = None, messages = None, documents = None, audiofiles = None):
+        logging.info(traceback.format_exc())
 
-    """
-    massage handler takes:
 
-    api_key - telegram bot's API key
+class Utilities:
 
-    chat_id - chat associated with the bot
+    '''
+    A bunch of secondary functions.
+    Checkers to prevent errors.
+    Timestamp to get unique key for dictionaries.
+    '''
 
-    messages - list of messages
-    ["message1", "message2"]
+    def check_api_key(api_key: str) -> NoReturn:
+        url = f"https://api.telegram.org/bot{api_key}/getMe"
 
-    documents - list of files' paths
+        try:
+            response = urllib.request.urlopen(base_url)
+            data = json.load(response)
 
-    audiofiles - list of audiofiles' paths
-    (the audiofile can be sent as a regular file, but the user will not be able to play it in a telegram then)
+            if not data["ok"]:
+                raise ValueError("API-key's check failed")
 
-    """
+            logger.info("API-key's check passed")
 
+        except urllib.error.URLError:
+            raise urllib.error.URLError("need to re-check internet connection")
 
-    if (api_key == None) or (chat_id == None):
-        print(ColorString(color = "red", text = "bot's API key and chat id are required"))
-        return
+    def check_files(packets: List[str]) -> NoReturn:
 
+        min_size = 1
+        max_size = 50 * 1024 * 1024
 
-    all_tries = (0 if messages is None else len(messages)) + (0 if documents is None else len(documents))  + (0 if audiofiles is None else len(audiofiles))
+        fucked_up_packages = {}
 
-    if (all_tries == 0):
-        print(ColorString(color = "red", text = "At least one argument for sending is required"))
-        return
+        for packet in packets:
 
+            if not os.path.exists(packet):
+                fucked_up_packages[packet] = "File not found"
 
-    sending_success = []
+            elif not os.path.isfile(packet):
+                fucked_up_packages[packet] = "Not a file"
 
-    sending_errors = []
+            elif min_size > os.path.getsize(packet) > max_size:
+                fucked_up_packages[packet] = "File must be not empty and less than 50 MB"
 
+        if fucked_up_packages:
+            error = "\n".join([f"{key}: {value}" for key, value in fucked_up_packages.items()])
+            raise ValueError(error)
 
-    if messages is not None:
+    def check_audiofiles(packets: List[str]) -> NoReturn:
 
-        m_url = f"https://api.telegram.org/bot{api_key}/sendMessage"
+        min_size = 1
+        max_size = 50 * 1024 * 1024
 
-        for message in messages:
+        allowed_formats = ["mp3", "ogg", "wav"]
 
-            params = {"chat_id": chat_id, "text": message}
+        fucked_up_packages = {}
 
-            response = requests.post(m_url, data = params)
+        for packet in packets:
 
-            if response.status_code == 200:
-                sending_success.append(message)
+            if not os.path.exists(packet):
+                fucked_up_packages[packet] = "File not found"
 
-            else: #I added try-except block here and in documents, couse mb future server response will be changed
-                try:
-                    description = ColorString(color = "red", text = json.loads(response.content)["description"])
+            elif not os.path.isfile(packet):
+                fucked_up_packages[packet] = "Not a file"
 
-                except (json.JSONDecodeError, KeyError):
-                    description = response.content
+            elif min_size > os.path.getsize(packet) > max_size:
+                fucked_up_packages[packet] = "File must be not empty and less than 50 MB"
 
-                sending_errors.append(f"{message}:\n\t{description}")
+            elif os.path.splitext(packet)[1] not in allowed_formats:
+                fucked_up_packages[packet] = f"File must be: {allowed_formats}"
 
+        if fucked_up_packages:
+            error = "\n".join([f"{key}: {value}" for key, value in fucked_up_packages.items()])
+            raise ValueError(error)
 
-    if documents is not None:
+    def get_timestamp() -> str:
+        return datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S_%f")
 
-        d_url = f"https://api.telegram.org/bot{api_key}/sendDocument"
 
-        for doc in documents:
+class SendingConfigs:
 
-            max_file_size = 50_000_000 #50 mb is max for 1 file telegram bots
+    '''
+    Sender-recipients configs, that class Dispatcher takes.
+    API-key: Telegram bot's key.
+    If value not saved in contacts file, can be set using classmethod manual_api_key(api_key)
 
-            if  os.path.exists(doc) and os.path.getsize(doc) < max_file_size:
+    Name of API-key (optional), for logging.
 
-                response = requests.post(d_url, data = {"chat_id": chat_id}, files = {"document": open(doc, "rb")})
+    Recipients (Itarable object) of integers (chat id).
+    If a dictionary is provided in format (int: str), the keys will be used as names for logging.
+    In other cases names will have "None" values
 
-                if response.status_code == 200:
-                    sending_success.append(doc)
+    Only obj.api_key_name can be changed.
+    '''
 
-                else:
-                    try:
-                        description = ColorString(color = "red", text = json.loads(response.content)["description"])
-                    except (json.JSONDecodeError, KeyError):
-                        description = response.content
-                    sending_errors.append(f"{doc}:\n\t{description}")
+    def __init__(self,
+                 api_key: str,
+                 recipients: Iterable[int],
+                 api_key_name: Optional[str] = None):
 
-            elif  os.path.exists(doc) and os.path.getsize(doc) > max_file_size:
-                description = ColorString(color = "red", text = f"file is bigger than bot's file limit, skipped")
-                sending_errors.append(f"{doc}:\n\t{description}")
+        self._api_key = api_key
+        self.api_key_name = api_key_name
+        self._recipients = recipients.copy() if isinstance(recipients, dict) else dict.fromkeys(recipients)
 
-            elif not os.path.exists(doc):
-                description = ColorString(color = "red", text = f"file not found")
-                sending_errors.append(f"{doc}:\n\t{description}")
+        logger.info(f"data for sending messages is formed, length: {len(self._recipients)}")
 
-            else:
-                print(ColorString(color = "cian", text = f"some unexpected problem with file: \"{doc}\""))
+        return self
 
-    if audiofiles is not None:
+    def _get_api_key(self) -> Tuple[str, str]:
+        return self._api_key, self.api_key_name
 
-        a_url = f"https://api.telegram.org/bot{api_key}/sendAudio"
+    api_key = property(_get_api_key)
 
-        for audio in audiofiles:
+    def _get_recipients(self) -> Dict:
+        return self._recipients
 
-            max_file_size = 50_000_000 #50 mb is max for 1 file telegram bots
+    recipients = property(_get_recipients)
 
-            if  os.path.exists(audio) and os.path.getsize(audio) < max_file_size:
 
-                response = requests.post(a_url, data = {"chat_id": chat_id}, files = {"audio": open(audio, "rb")})
+    def manual_api_key(self, new_api_key: str):
+        '''
+        Provide API-key value manually.
+        Will raise an error, if value of API-key is already set.
+        '''
+        if api_key:
+            error = f"Replacing of existing key is not possible"
+            raise AttributeError(error)
 
-                if response.status_code == 200:
-                    sending_success.append(audio)
+        else:
+            self._api_key = new_api_key
 
-                else:
-                    try:
-                        description = ColorString(color = "red", text = json.loads(response.content)["description"])
-                    except (json.JSONDecodeError, KeyError):
-                        description = response.content
-                    sending_errors.append(f"{audio}:\n\t{description}")
+        logger.info("Using manual provided api-key")
+        return self
 
-            elif  os.path.exists(audio) and os.path.getsize(audio) > max_file_size:
-                description = ColorString(color = "red", text = f"file is bigger than bot's file limit, skipped")
-                sending_errors.append(f"{audio}:\n\t{description}")
 
-            elif not os.path.exists(audio):
-                description = ColorString(color = "red", text = f"file not found")
-                sending_errors.append(f"{audio}:\n\t{description}")
+    def add_recipients(self,
+                       recipients: Iterable[str],
+                       overwrite_names: bool = False):
 
-            else:
-                print(ColorString(color = "cian", text = f"some unexpected problem with file \"{audio}\""))
+        if isinstance(recipients, dict) and overwrite_names:
+            self._recipients.update(recipients)
 
+        else:
+            for recipient in recipients:
+                self._recipients.setdefault(recipients)
 
-    if (all_tries != 0) and (all_tries == len(sending_success)):
-        print(ColorString(color = "green", text = "Sent successfully"))
+        logger.info("Recipients list updated")
+        return self
 
-    elif (all_tries > 0) and (len(sending_success) == 0):
-        print(ColorString(color = "red", text = "Errors by sending all messages:"), *sending_errors, sep = "\n")
 
-    elif (all_tries > 0)  and (len(sending_success) > 0):
-        print(ColorString(color = "red", text = "Errors by sending some messages:"), *sending_errors, sep = "\n")
-        print(ColorString(color = "green", text = "\nOther messages send:"), *sending_success)
+class ContactsFile:
 
-    else:
-        print(ColorString(color = "cian", text = f"some unexpected problem with errors counting"))
+    '''
+    Class to wotk with contacts file.
+    There are two main functions:
 
+    ContactsFile.AddContacts.from_messages(api_key)
+    to parce incoming messages and extract values into contacts file
 
+    ContactsFile.create_sending_configs(searching_names, searching_bulk_groups)
+    to create configs object for Dispatcher
 
-def contacts_creator(api_key = None):
+    Also Copy subclass provides function to encrypt and decrypt contacts file, if you want to check the file manually
+    '''
 
-    if not contacts_file_exists:
+    _name = ".tgsend.contacts"
 
-        file_structure = {"bot_api_key" : api_key,
-                          "default_chat" : None,
-                          "contacts": {}}
+    _directory = os.path.dirname(os.path.realpath(__file__))
 
-        with open(contacts_file_path, "w") as contacts:
-            json.dump(file_structure, contacts)
+    _path = os.path.join(_directory, _name)
 
-        print(ColorString(color = "green", text = "contacts file created"))
+    _structure = {
+        "default": None,
+    }
 
-    else:
-        print(ColorString(color = "red", text = "file \".tgsend.contacts\" already exists"))
+    _key_structure = {
+        "api_key": None,
+        "contacts": {},
+        "bulk_groups": {},
+        "default": None
+    }
 
+    RESERVED_NAMES = set(_structure).union(_key_structure)
 
-def contacts_show():
+    '''
+    see __init__ in ModuleBaseException class for explanations
+    group all predicted errors from create function
+    '''
 
-    if contacts_file_exists and (saved_contacts != None):
-        for name in saved_contacts.keys():
-            print(f"{name}: {saved_contacts[name]}")
+    class FileCreatingError(ModuleBaseException):
+        def __str__(self):
+            error = Colorize(text = "File creating error: ", color = "red")
+            return error + str(self.args[0])
 
-    elif not contacts_file_exists:
-        print(ColorString(color = "red", text = "contacts file not found"))
 
-    elif contacts_file_exists and (saved_contacts == None):
-        print(ColorString(color = "yellow", text = "contacts file is empty"))
+    class FileEditingError(ModuleBaseException):
+        def __str__(self):
+            error = Colorize(text = "File editing error: ", color = "red")
+            return error + str(self.args[0])
 
-    else:
-        print(ColorString(color = "cian", text = f"some unexpected problem by showing contacts file"))
 
+    class ReservedValueError(Exception):
+        def __str__(self):
+             error = "This values are reserved: " + ", ".join(ContactsFile.RESERVED_NAMES)
+             return error + ", ".join(ContactsFile.RESERVED_NAMES)
 
-def contacts_editor(chat_add = None, chat_remove = None):
 
-    print(ColorString(color = "magenta", text = "this function will be added in future update, but you can manually edit contacts file"))
-    pass
+    class FileCorruptedError(Exception):
+        def __str__(self):
+            error = "ContactsFile found but corrupted"
+            return error
 
-    # if not contacts_file_exists:
-    #     print(ColorString(color = "red", text = "contacts file not found"))
 
-    # else:
+    class ContactsFileExistsError(FileExistsError):
+        def __init__(self, message = None):
+            if message is None:
+                message = f"File '{ContactsFile._path}' already exists"
+            super().__init__(message)
 
-    #     if chat_add != None:
 
-    #         contact_name = chat_add[0]
-    #         contact_number = chat_add[1]
+    class FileSavingError(ModuleBaseException):
+        def __str__(self):
+            error = Colorize(text = "File saving error: ", color = "red")
+            return error + str(self.args[0])
 
-    #         if (type(contact_name) != string) or (type(contact_number) != integer):
-    #             print(ColorString(color = "red", text = "values must be string and integer"))
 
+    class FileLoadingError(ModuleBaseException):
+        def __str__(self):
+            error = Colorize(text = "File loading error: ", color = "red")
+            return error + str(self.args[0])
 
-    #         if contact_name in saved_contacts.keys():
-    #             print(ColorString(color = "red", text = "contact with this name already exists"))
 
-    #         else:
+    @classmethod
+    def create(cls,
+               api_key_name: str,
+               api_key: Optional[str] = None,
+               file_key: Optional[bytes] = FILE_KEY,
+               set_default: Optional[bool] = True,
+               force_mode: Optional[bool] = False,
+               autoconfirm: Optional[bool] = False
+               ) -> NoReturn:
 
-    #         with open(contacts_file_path, "w") as contacts:
+        if api_key_name in cls.RESERVED_NAMES:
+            raise cls.ReservedValueError
 
-    #             elif chat_remove != None:
+        if not api_key and not force_mode:
+            error = "Empty api-key value. Use force-mode to save leer value, or provide valid API-key"
+            raise cls.FileCreatingError(error)
 
-def get_id(api_key = None, searching_username = None, searching_text = None):
+        contacts_dict = cls._structure
+        contacts_dict[api_key_name] = cls._key_structure
 
-    if api_key != None:
+        if set_default:
+            contacts_dict["default"] = api_key_name
+
+        contacts_dict[api_key_name]["api_key"] = api_key
 
         try:
 
+            if not force_mode and os.path.exists(cls._path):
+                raise cls.ContactsFileExistsError
+
+            if api_key is None and not autoconfirm:
+
+                while True:
+                    action = input("Save empty API-key? (y/N)")
+
+                    if not action or action.lower() == "n":
+                        raise KeyboardInterrupt
+
+                    elif action.lower() == "y":
+                        break
+
+            cls._save(contacts_dict)
+            print("Contacts file successfully created")
+
+        except (cls.ReservedValueError, FileExistsError) as e:
+            raise cls.FileCreatingError(e)
+
+        except KeyboardInterrupt:
+            raise cls.FileCreatingError("Operation aborted by user")
+
+        except Exception as e:
+            file_name = Utilities.get_timestamp() + ".log"
+            error = "Unexpected error during contacts file creation: " + str(e)
+
+            with open(file_name, "w") as output:
+                output.write(error + "\n" + traceback.format_exc())
+
+            print(f"file '{file_name}' contains error traceback log")
+            raise
+
+
+    class Copy:
+
+        class DecryptionError(ModuleBaseException):
+            def __str__(self):
+                error = "Decryption Error: "
+                return error + str(self.args[0])
+
+        class EncryptionError(ModuleBaseException):
+            def __str__(self):
+                error = "Encryption Error: "
+                return error + str(self.args[0])
+
+        def decrypt(file_path: Optional[str] = "tgsend.contacts.decrypted",
+                    file_key: Optional[bytes] = FILE_KEY,
+                    force_mode: Optional[bool] = False,
+                    )-> NoReturn:
+
+            contact_file = ContactsFile._load(file_key = file_key)
+
+            if not force_mode and os.path.exists(file_path):
+                raise DecryptionError(f"File '{file_path}' already exists. Use --force to owerwrite.")
+
+            try:
+                with open(file_path, "w") as copy:
+                    json.dump(contact_file, copy)
+                logger.info("File decrypted")
+
+            except (FileNotFoundError, IOError) as e:
+                raise DecryptionError(e)
+
+            except Exception as e:
+                file_name = Utilities.get_timestamp() + ".log"
+                error_message = f"Unexpected error during decryption of '{file_path}': " + str(e)
+                with open(file_name, "w") as output:
+                    output.write(error_message + "\n" + traceback.format_exc())
+                print(f"File '{file_name}' contains error traceback log")
+                raise
+
+
+        def encrypt(file_path: str, file_key: Optional[bytes] = FILE_KEY) -> NoReturn:
+
+            try:
+                with open(file_path, "r") as copy:
+                    contact_file = json.load(copy)
+                ContactsFile._save(contact_file, file_key=file_key)
+                logger.info("File encrypted")
+
+            except (FileNotFoundError, IOError, json.JSONDecodeError) as e:
+                raise EncryptionError(e)
+
+            except Exception as e:
+                file_name = Utilities.get_timestamp() + ".log"
+                error_message = f"Unexpected error during encryption of '{file_path}': " + str(e)
+                with open(file_name, "w") as output:
+                    output.write(error_message + "\n" + traceback.format_exc())
+                print(f"file '{file_name}' contains error traceback log")
+                raise
+
+
+
+    class Edit:
+
+        '''
+        Edit contacts file
+
+        '''
+
+
+        def add_api_key(api_key_name: str,
+                        api_key: Optional[str] = None,
+                        file_key: Optional[bytes] = FILE_KEY,
+                        set_default: Optional[bool] = False,
+                        force_mode: Optional[bool] = False,
+                        autoconfirm: Optional[bool] = False,
+                        ) -> NoReturn:
+
+            if api_key_name in ContactsFile.RESERVED_NAMES:
+                logger.info("invalid api_key_name value")
+                raise ContactsFile.ReservedValueError
+
+            contacts_dict = ContactsFile._load()
+
+            if not force_mode and api_key_name in contacts_dict:
+
+
+
+                contacts_dict[api_key_name] = ContactsFile._key_structure
+                contacts_dict[api_key_name]["api_key"] = api_key
+                message = Colorize(text = f"api-key {api_key_name} seccessfully added", color = "green")
+
+
+            try:
+
+            elif api_key_name in contacts_dict.keys():
+                error = "API-key with this name already exists, use force-mode to over-write"
+                raise ValueError(error)
+
+            elif api_key is None and not force_mode:
+                error = "API-key is not provided, use force_mode to save key without value"
+                raise ValueError(error)
+
+            else:
+                contacts_dict[api_key_name] = ContactsFile._key_structure
+                contacts_dict[api_key_name]["api_key"] = api_key
+                cls._save(contacts_dict)
+                message = Colorize(text = f"api-key {api_key_name} seccessfully added", color = "green")
+                print(message)
+
+
+
+
+        contacts_dict = cls._structure
+        contacts_dict[api_key_name] = cls._key_structure
+
+        if set_default:
+            contacts_dict["default"] = api_key_name
+
+        if api_key:
+            if api_key in cls.RESERVED_NAMES:
+                raise cls.ReservedValueError
+
+            contacts_dict[api_key_name]["api_key"] = api_key
+
+        try:
+
+            if not force_mode and os.path.exists(cls._path):
+                raise cls.ContactsFileExistsError
+
+            if api_key is None and not autoconfirm:
+
+                while True:
+                    action = input("Save empty API-key? (y/N)")
+
+                    if not action or action.lower() == "n":
+                        raise KeyboardInterrupt
+
+                    elif action.lower() == "y":
+                        break
+
+            cls._save(contacts_dict)
+            print("Contacts file successfully created")
+
+        except (cls.ReservedValueError, FileExistsError) as e:
+            raise cls.FileCreatingError(e)
+
+        except KeyboardInterrupt:
+            raise cls.FileCreatingError("Operation aborted by user")
+
+        except Exception as e:
+            file_name = Utilities.get_timestamp() + ".log"
+            error = "Unexpected error during contacts file creation: " + str(e)
+
+            with open(file_name, "w") as output:
+                output.write(error + "\n" + traceback.format_exc())
+
+            print(f"file '{file_name}' contains error traceback log")
+            raise
+
+
+
+    class AddContacts:
+
+        class Message(NamedTuple):
+            chat_id: int
+            username: str
+            first_name: str
+            text: str
+
+
+        @classmethod
+        def from_updates(cls,
+                         api_key_name: str,
+                         api_key: str = None,
+                         filter_username: str = None,
+                         filter_text: str = None) -> NoReturn:
+
+            contacts_dict = super()._load()
+
+            if api_key_name not in contacts_dict.keys():
+                error = f"api-key '{api_key_name}' is not exists in contacts file"
+                raise ValueError(error)
+
+            if api_key is not None:
+                api_key = contacts_dict[api_key_name]["api_key"]
+                logger.info("api key taken from contacs file")
+
+            Utilities.check_api_key(api_key)
+
+
+        def _get_updates(api_key: str) -> List:
+
             url = f'https://api.telegram.org/bot{api_key}/getUpdates'
 
-            response = requests.get(url)
+            logger.info("Getting updates from Telagram server")
 
-            if response.status_code == 200:
+            try:
 
-                data = json.loads(response.content)
+                with urllib.request.urlopen(url) as response_raw:
+                    response = json.loads(response_raw.read())
 
-                messages = data["result"]
+                if not response.get("ok"):
+                    error = "Wrong API-call"
+                    raise ValueError(error)
 
-                result = None
+                elif response["result"] == []:
+                    error = "no updates, send some message to bot, and try again"
+                    raise ValueError(error)
 
-                if len(messages) == 0:
+                logger.info("returing data from Telegram server")
+                return response["result"]
 
-                    print(ColorString(color = "red", text = "no messages found"))
-                    return
+            except Exception as e:
+              error = "error retrieving data from Telegram server: " + e.args[0]
+              raise Exception(error)
 
-                if searching_username != None:
 
-                    for message in messages:
-                        if message["message"]["from"]["username"] == searching_username:
-                            text = message["message"]["text"]
-                            chat_id = message["message"]["chat"]["id"]
-                            result = (searching_username, chta_id, text)
-                            break
+        def _format_messages(messages: list[Message]) -> list[Message]:
 
-                elif searching_text != None:
+            '''
+            get "result" friom Telagram, extact values and form Message class from each message
+            '''
+            logger.info("messages formating starts")
 
-                    for message in messages:
-                        if message["message"]["text"] == searching_text:
-                            username = message["message"]["from"]["username"]
-                            chat_id = message["message"]["chat"]["id"]
-                            result = (searching_username, chat_id, text)
-                            break
+            formated_messages_dict = {}
+
+            for message in messages:
+
+                shortcut = message["message"]["from"]
+
+                chat_id = shortcut["id"]
+                username = shortcut.get("username", "NOUSERNAME")
+                first_name = shortcut.get("first_name", "NOFIRSTNAME")
+                text = message["message"].get("text", "")
+
+                '''
+                formated_messages_dict[chat_id] = Message(chat_id=chat_id, username=username, first_name=first_name, text=text)
+                should be modified to use formated_messages_dict[chat_id] as the key inside the NamedTuple.
+                It should be formated_messages_dict[chat_id] = Message(message.chat_id, username, first_name, text).
+
+                '''
+                formated_messages_dict[chat_id] = Message(chat_id = chat_id, username = username,
+                                                          first_name = first_name, text = text)
+
+            formated_messages = formated_messages_dict.values()
+
+            logger.info(f"returning {len(formated_messages)} messages")
+            return formated_messages
+
+
+        def _filter_messages(messages: List[Message],
+                             existing_chat_id: List[int],
+                             filter_username: str = None,
+                             filter_text: str = None
+                             ) -> list[Message]:
+
+            '''
+            filter each Message according:
+            1) not in dictionary
+            2) from username
+            3) contains right message
+            '''
+            logger.info(f"Start filtering messages, filter by username: {filter_username}, filter by text: {filter_text}")
+
+            filtered_messages = []
+
+            for message in messages:
+
+                if message.chat_id in existing_chat_id:
+                    logger.info(f"{message.chat_id} already in contacts file")
+                    continue
+
+                elif filter_text != None and message.text != filter_text:
+                    logger.info(f"{message.text} from {message.username}({message.chat_id}) not matches to {filter_text}")
+                    continue
+
+                elif filter_username != None and message.username not in (filter_username, "NOUSERNAME"):
+                    logger.info(f"{message.username}({message.chat_id}) not matches to {filter_username}")
+                    continue
+
+                else:
+                    filtered_messages.append(message)
+
+            logger.info(f"returning {len(filtered_messages)} filtered messages")
+
+            return filtered_messages
+
+
+        def _check_messages(messages: list[Message], existing_contacts: Dict[str, int]) -> NoReturn:
+
+            logger.info("starting checking of messages")
+
+            existing_contacts = existing_contacts.copy()
+
+            c_message = Colorize(text = f"There are {len(messages)} contacts to check", color = "green")
+            print(c_message)
+
+            for message in messages[:]:
+
+                chat_id = message.chat_id
+                username = message.username
+                full_text = message.text
+                text = (full_text[:50] + "...") if len(full_text) > 50 else full_text
+
+                if chat_id in existing_contacts.values():
+                    existing_username = next(key for key, value in existing_contacts.items() if value == chat_id)
+                    c_message = Colorize(text=f"'{username}' already saved in contacts file as '{existing_username}', skipped", color="yellow")
+                    print(c_message)
+                    messages.remove(message)
 
                 else:
 
-                    result = []
-                    for message in messages:
-                        text = message["message"]["text"]
-                        username = message["message"]["from"]["username"]
-                        chat_id = message["message"]["chat"]["id"]
-                        result.append(f"{searching_username} {chat_id} {text}")
+                    try:
+
+                        contact_not_processed = True
+
+                        while contact_not_processed:
+
+                            action = input(f"'{username}': {text}\nAdd '{username}' (Y/n)? ")
+
+                            if action.lower() in ("y", ""):
+
+                                while contact_not_processed:
+
+                                    if username in existing_contacts:
+                                        new_username = input(f"Enter a contact name for (name '{username}' already set to another contact):\n")
+
+                                    else:
+                                        new_username = input(f"Enter a new username for '{username}' (or press Enter to keep the username):\n")
+                                        new_username = username if new_username == "" else new_username
+
+                                    if len(new_username) < 3:
+                                        c_message = Colorize(text = "Contact's name is too short", color = "red")
+                                        print(c_message)
+
+                                    else:
+                                        confirm = input(f"Add contact with username '{new_username}'? (Y/n): ")
+
+                                        while contact_not_processed:
+
+                                            if not confirm or confirm.lower() == "y":
+                                                c_message = Colorize(text=f"Adding contact: {new_username}", color="green")
+                                                existing_contacts[new_username] = message.chat_id
+                                                messages.remove(message)
+                                                print(c_message)
+                                                contact_not_processed = False
+                                                break
+
+                                            elif confirm.lower() == "n":
+                                                break
+
+                                            else:
+                                                c_message = Colorize(text = "Wrong input", color = "red")
+                                                print(c_message)
 
 
-                if result != None:
-                    print(*result)
+                            elif action.lower() == "n":
+                                c_message = Colorize(text = f"Username '{username}' skipped", color = "yellow")
+                                print(c_message)
+                                messages.remove(message)
+                                break
 
-                else:
-                    print(ColorString(color = "red", text = "nothing found"))
 
-        except (json.JSONDecodeError, KeyError):
-            print(ColorString(color = "red", text = "Some unexpected problem"))
+                            else:
+                                c_message = Colorize(text = "Wrong input", color = "red")
+                                print(c_message)
 
-    else:
-        print(ColorString(color = "red", text = "API-key required"))
+                    except KeyboardInterrupt:
+                        messages.remove(message)
+                        c_message = Colorize(text = f"\n'{username}' skipped", color = "yellow")
+                        print(c_message)
+
+
+
+    @classmethod
+    def _load(cls, file_key = FILE_KEY) -> dict:
+
+        try:
+
+            with open(cls._path, mode = "rb") as file:
+                binary_data = file.read()
+
+            encrypted_data = binary_data[:-64]
+
+            stored_hash = binary_data[-64:]
+
+            new_hash = hashlib.sha256(encrypted_data).hexdigest().encode()
+
+            if new_hash != stored_hash:
+                error = f"file {cls._name} corrupted"
+                raise FileCorruptedError(error)
+
+            decrypted_data = bytearray(byte ^ key for byte in encrypted_data)
+
+            contacts_dict = json.loads(decrypted_data.decode())
+
+            return contacts_dict
+
+        except cls.FileCorruptedError as e:
+            raise e
+
+        except FileNotFoundError:
+            error = f"file not found: {cls._path}"
+            raise FileNotFoundError(error)
+
+        except json.JSONDecodeError:
+            error = f"file not decoded into dictionary: {cls._path}"
+            raise json.JSONDecodeError(error)
+
+        except Exception as e:
+            error = f"error during reading '{cls._path}'" + str(e)
+            raise Exception(error)
+
+
+    @classmethod
+    def _save(cls, new_file, key: bytes = FILE_KEY) -> NoReturn:
+
+        json_data = json.dumps(new_file)
+
+        encrypted_data = bytearray(byte ^ key for byte in json_data.encode())
+
+        new_hash = hashlib.sha256(encrypted_data).hexdigest().encode()
+
+        export_data = encrypted_data + new_hash
+
+        with open(cls._path, "wb") as file:
+            file.write(export_data)
+
+
+    @classmethod
+    def show_contacts(cls, api_key_name:str) -> NoReturn:
+
+        contacts_dict = cls._load()
+
+        api_keys = [key for key in contacts_dict.keys() if key != "default"]
+
+        if api_keys == 0:
+            message = f"no api-keys in contacts file"
+            raise ValueError(message)
+
+        elif api_key_name not in api_keys:
+            message = f"api-key '{api_key_name}' not found, avalibale presented keys:\n{api_keys}"
+            raise ValueError(message)
+
+        elif contacts_dict[api_key_name]["contacts"] == {}:
+            message = f"no contacts to ’{api-key}’ found"
+            raise ValueError(message)
+
+        else:
+            contacts = contacts_dict[api_key_name]["contacts"].keys()
+            print(*contacts)
+
+    @classmethod
+    def create_sending_configs(cls,
+                               api_key_name: str,
+                               api_key: str = None,
+                               searching_chat_names: Union[str, Iterable[str]] = None,
+                               searching_bulk_groups: Union[str, Iterable[str]] = None,
+                               manual_id: Union[int, Iterable[int]] = None,
+                               ) -> SendingConfigs:
+
+        '''
+        read contacts file for chat id accoring gived names and return a SendingCofigs object.
+
+
+        '''
+        contacts_dict = cls._load()
+
+        if api_key_name not in contacts_dict.keys():
+            error = "name of api-key not found in  contacts file"
+            raise ValueError(error)
+
+        elif api_key is not None:
+            saved_api_key = contacts_dict[api_key_name][api_key]
+            if saved_api_key != "":
+                error = f"another api-key saved to by name '{api_key_name}'"
+                raise ValueError(error)
+
+        elif all(arg is None for arg in (searching_chat_names, searching_bulk_groups, manual_id)):
+            error = "No recipients specified"
+            raise ValueError (error)
+
+        recipients = dict()
+        not_found = dict()
+
+        if searching_bulk_groups is not None:
+
+            if isinstance(searching_bulk_groups, str):
+                searching_bulk_groups = {searching_bulk_groups}
+            else:
+                searching_bulk_groups = set(searching_bulk_groups)
+
+            bulk_groups = contacts_dict[api_key_name]["bulk_groups"]
+            not_found["bulk_groups"] = {group for group in searching_bulk_groups if group not in bulk_groups}
+            found_groups = searching_bulk_groups - not_found["bulk_groups"]
+            found_groups_values = set()
+            for group in found_groups:
+                found_groups_values |= contacts_dict[api_key_name]["bulk_groups"][group]
+
+            bulk_recipients = dict.fromkeys(found_groups_values)
+
+            recipients.update(bulk_recipients)
+
+        if manual_id is not None:
+            if isinstance(manual_id, int):
+                manual_id = {manual_id}
+            if isinstance(manual_id, dict):
+                recipients.update(manual_id)
+            else:
+                manual_id = dict.fromkeys(manual_id)
+                recipients.update(manual_id)
+
+        if searching_chat_names is not None:
+
+            if isinstance(searching_chat_names, str):
+                searching_chat_names = {searching_chat_names}
+
+            contacts = contacts_dict[api_key_name]["contacts"]
+
+            found_contacts = {value: key for key, value in contacts.items() if key in searching_chat_names}
+
+            not_found["contacts"] = {name for name in searching_chat_names if name not in contacts}
+
+            for key, value in found_contacts.items():
+                recipients.setdefault(key, value)
+
+
+        if not_found:
+            print("These names not found:")
+            for key, value in not_found.items():
+                print(key, ": ", *value)
+
+        if not contacts:
+            print("Recipients list is leer")
+
+        return SendingConfigs(api_key = api_key, api_key_name = api_key_name, recipients = recipients)
+
+
+class Dispatcher:
+
+    '''
+    Dispatcher takes:
+
+    for 'send' function:
+    NOTE: messages can be send also without requests library
+
+    messages - list of messages, will be send for each recipient one-by-one
+    ["message1", "message2"]
+
+    documents - list of files' pathes, will be skipped, if module requests not imported
+    default mode for each file
+    ["path_to_file1", "path_to_file2"]
+
+    audiofiles - list of audiofiles' paths, same as documents
+    (audiofiles can be sent as a regular files(document), in that case user will not be able to play audiofiles in telegram)
+
+    probably i will add some new feachers to send photos, stickers etc,
+    but now I'm using this module to send files and messages from bash,
+    or critical-level erros from other scripts
+
+    Send function returns:
+    dictionary of successfully sent messages(documents, audiofiles, etc)
+    and a dictionary of unsuccessful ones
+    and control sum of all packeges. that were taken.
+
+    both dictionaries have structure like:
+    {timestamp: description}
+    '''
+
+    FILE_TYPES = Literal["files", "audiofiles"]
+
+    class SendingStatus(NamedTuple):
+        success: Dict[str, str]
+        fail: Dict[str, str]
+
+    def __init__(self, configs: SendingConfigs) -> NoReturn:
+
+        self._api_key: str = configs.api_key
+        self.api_key_name: str = configs.api_key_name
+        self._recipients: Dict[int, str] = configs.recipients.copy()
+
+        self._sending_success = {}
+        self._sending_errors = {}
+
+        self._invalid_packets = {}
+
+        Utilities.check_api_key(self.api_key)
+
+    def _get_api_key(self):
+        return self._api_key, self._api_key_name
+    api_key = property(_get_api_key)
+
+    def _get_recipients(self):
+        return self._recipients
+    recipients = property(_get_recipients)
+
+    async def _message_handler(self, message) -> NoReturn:
+
+        tasks = [self._message_dispatcher(messages, recipient_id, recipient_name) for recipient_id, recipient_name in self._recipients.values()]
+
+        await asyncio.gather(*tasks)
+
+
+    async def _message_dispatcher(self, messages: str, recipient_id: int, recipient_name: str) -> NoReturn:
+
+        url = f"https://api.telegram.org/bot{self.api_key}/sendMessage"
+
+        params = {"chat_id": recipient_id, "text": message}
+
+        data = urllib.parse.urlencode(params).encode("utf-8")
+
+        with await urllib.request.urlopen(url, data) as response:
+            response_data = response.read().decode("utf-8")
+            response_json = json.loads(response_data)
+
+        key = Utilities.get_timestamp()
+
+        if response_json.get("ok"):
+            self._sending_success[key] = f"recipient: {recipient_id}/{recipient_name}"
+
+        else:
+            error_description = response_json.get("description", "Unknown error")
+            description = f"recipient: {recipient_id}/{recipient_name}\n{error_description}"
+            self._sending_errors[key] = description
+
+
+    async def _files_handler(self, packets: List[str], packets_type: FILE_TYPES, caption: Optional[str] = None) -> NoReturn:
+
+
+        if packet_type == "audiofiles":
+            url = f"https://api.telegram.org/bot{self.api_key}/sendAudio"
+
+        else:
+            url = f"https://api.telegram.org/bot{self.api_key}/sendDocument"
+
+        open_files = [("document", open(packet, "rb")) for packet in packets]
+
+        tasks = [self._files_dispatcher(url, open_files, recipient_id, recipient_name, caption) for recipient_id, recipient_name in self.recipients.items()]
+
+        await asyncio.gather(*tasks)
+
+
+    async def _files_dispatcher(self,
+                                url: str,
+                                open_files: List[BinaryIO],
+                                recipient_id: int,
+                                recipient_name: str,
+                                caption: Optional[str]
+                                ) -> NoReturn:
+
+        data = {"chat_id": recipient_id}
+
+        if caption:
+            data["caption"] = caption
+
+        response = await requests.post(url, data = data, files = open_files)
+
+        key = Utilities.get_timestamp()
+
+        if response.status_code == 200:
+           self._sending_success[key] =  f"recipient: {recipient_id}/{recipient_name}"
+
+        else:
+           description = f"recipient: {recipient_id}/{recipient_name}\n" + str(json.loads(response.content)["description"])
+           self._sending_errors[key] = description
+
+    def send_message(self, message: str) -> SendingStatus:
+
+        self._sending_success.clear()
+        self._sending_errors.clear()
+
+        if len(package) > 4096:
+            raise ValueError("message is too long: max 4096 symbols per one message")
+
+        asyncio.run(self._message_handler(message))
+
+        return SendingStatus(successful = self._sending_success, failed = self._sending_errors, checksum = len(self.recipients))
+
+
+    def send_files(self, packets: List[str]) -> SendingStatus:
+
+        if not REQUESTS:
+            raise ImportError("Files can't be send without 'requests' library")
+
+        self._sending_success.clear()
+        self._sending_errors.clear()
+
+        Utilities.check_files(packets = packets)
+
+        checksum = len(self.recipients) * len(packet)
+
+        asyncio.run(self._file_handler(packets = packets, p_type = "files"))
+
+        return SendingStatus(success = self._sending_success, fail = self._sending_errors, checksum = checksum)
+
+    def send_audiofiles(self, packets: List[str]) -> SendingStatus:
+
+        if not REQUESTS:
+            raise ImportError("Files can't be send without 'requests' library")
+
+        Utilities.check_audiofiles(packets = packets)
+
+        self._sending_success.clear()
+        self._sending_errors.clear()
+
+        checksum = len(self.recipients) * len(packets)
+
+        asyncio.run(self._file_handler(packets = packets, p_type = "audiofiles"))
+
+        return SendingStatus(success = self._sending_success, fail = self._sending_errors, checksum = checksum)
+
+
+
+
+class Handler:
+
+    '''
+    Main class of this script with a couple of function:
+
+    handler - wrapper for dispatcher, that also extracts values from contacts file,
+    deals with errors and calls dispatcher with extracted values.
+
+    Basicly, handler is good for for one-time calling of the script, from terminal or another script.
+
+    But to avoid multiple opening of contacts file, you can use Dispatcher with values,
+    extracted from contacts file using ContactsFile.get_values
+
+    Also it will be better for logging, couse Dispatcher.send returns dictionaries of
+    sending good and bad messages or/and files (and control sum of packages for sure).
+   '''
+
+    @classmethod
+    def dispatcher_wrapper(cls,
+                           api_key: str = None,
+                           api_key_name: str = None,
+                           chat_id: int = None,
+                           chat_name: str = None,
+                           print_success: bool = True,
+                           messages: list[str] = [],
+                           documents: list[str] = [],
+                           audiofiles: list[str] = []
+                           ) -> EXIT_STATUS:
+
+        try:
+
+            # this shit will raise an error when will provided no arguments or both
+            if (api_key and api_key_name) or (not api_key and not api_key_name):
+                error = "saved API-key name (using -A flag for non-defualt values) OR manually provided API-key (using -M flag) required"
+                raise ValueError(error)
+
+            elif (chat_id and chat_name) or (not chat_id and not chat_name):
+                error = "chat id name (from contacts file, using -t flag for non-default values) OR manually provided (using -T flag) required"
+                raise ValueError(error)
+
+            elif not any((messages, documents, audiofiles)):
+                error = "nothing to send"
+                raise ValueError(error)
+
+            # get values according providen names
+            extracted_values = ContactsFile.get_values(api_key_name = api_key_name, chat_name = chat_name)
+
+            api_key = extracted_values.get("api_key", api_key)
+            chat_id = extracted_values.get("chat_id", chat_id)
+
+            one_time_dispatcher = Dispatcher(api_key = api_key, chat_id = chat_id)
+
+            status_dictionaries = one_time_dispatcher.send(messages = messages,
+                                                           documents = documents,
+                                                           audiofiles = audiofiles)
+
+            exit_status = cls._status_printer(status_dictionaries,
+                                              print_success = print_success)
+
+        except (Exception, BaseException) as e:
+
+            exit_status = 2
+            if isinstance(e, (SystemExit, KeyboardInterrupt)):
+                raise
+
+            else:
+               error = Colorize(text = e.args[0], color = "red")
+               print(error)
+
+               # traceback.print_exc()
+
+        finally:
+            return exit_status
+
+
+    def _status_printer(status: Dispatcher.SendingStatus, print_success = True) -> EXIT_STATUS:
+
+        exit_status = 0
+
+        amount = len(status.sending_success) + len(status.sending_errors)
+
+        if amount != status.checksum:
+            message = Colorize(text = f"amount of packages({amount}) is not equal to checksum({status.checksum})", color = "magenta", bold = True)
+            print(message)
+            print("success:\n", *status.sending_success.items(), sep = "\n"),
+            print("failure:\n", *status.sending_errors.itmes(), sep = "\n")
+            exit_status = 2
+
+        elif len(status.sending_success) == status.checksum:
+            if print_success:
+                message = Colorize(text = "all packages successfully delivered", color = "green")
+                print(message)
+            exit_status = 0
+
+        elif len(status.sending_errors) == status.checksum:
+            message = Colorize(text = "errors by sending all packages:", color = "red")
+            print(message)
+            print(*status.sending_errors.values(), sep = "\n")
+            exit_status = 2
+
+        else:
+            if print_success:
+                message = Colorize(text = "some packages successfully delivered:", color = "green")
+                print(message)
+                print(*status.sending_success.values(), sep = "\n")
+
+            message = Colorize(text = "some packages are not delivered:", color = "red")
+            print(message)
+            print(*status.sending_errors.values(), sep = "\n")
+            exit_status = 1
+
+        return exit_status
+
+
+
 
 # ------------------------------------------------------- main part -------------------------------------------------------- #
 
-def main():
 
-    # try to read contacts file
-    if contacts_file_exists:
-        with open (contacts_file_path, "r") as contacts_file:
-            try:
-                data = json.load(contacts_file)
-                bot_api_key = data["bot_api_key"]
-                default_chat = data["default_chat"]
-                saved_contacts = data["contacts"] if (len(data["contacts"]) != 0) else None
-            except (json.JSONDecodeError, IndexError):
-                print(ColorString(color = "yellow", text = "contacts file is corrupted"))
+def main() -> EXIT_STATUS:
 
-                bot_api_key = None
-                default_chat = None
-                saved_contacts = None
-
-    else:
-        bot_api_key = None
-
-        default_chat = None
-
-        saved_contacts = None
+    exit_status = 0
 
     # setup parser and subparser
-    parser = argparse.ArgumentParser(description="Send message or/and document from shell to Telegram",
-                                     epilog="https://github.com/signifex")
+    parser = argparse.ArgumentParser(description = "Send messages or/and documents from shell to Telegram bot",
+                                     epilog = "https://github.com/signifex")
 
-    subparsers = parser.add_subparsers(title="commands",
-                                       description="valid commands",
-                                       dest="command",
-                                       help="description")
+    subparsers = parser.add_subparsers(title = "commands",
+                                       description = "valid commands",
+                                       dest = "command",
+                                       help = "description")
 
 
     # main parser for sending messages and documents
     message_handler_parser = subparsers.add_parser("send", help = "send message or file to chat")
 
-    message_handler_parser.add_argument("-A", "--api_key",
-                                        metavar = "<API-key>",
-                                        dest = "sending_bot_api",
-                                        default = bot_api_key,
-                                        help = "bot's api key, by default will be readed from contacts file")
+    api_key = message_handler_parser.add_mutually_exclusive_group(required = False)
+
+    api_key.add_argument("-k", "--api_key",
+                         metavar = "<name of saved API-key>",
+                         dest = "api_key_name",
+                         help = "saved bot's api key, by default will be readed from contacts file")
+
+    api_key.add_argument("-K", "--manual_api_key",
+                         metavar = "<API-key>",
+                         dest = "api_key",
+                         help = "manual provided API-key")
 
     recipient = message_handler_parser.add_mutually_exclusive_group(required = False)
 
-    recipient.add_argument("-t", "--to_saved_chat",
-                           metavar = "<chat name>",
-                           dest = "sending_chat_name",
+    recipient.add_argument("-c", "--to_saved_chat",
+                           metavar = "<saved chat name>",
+                           dest = "chat_name",
                            type = str,
                            help = "name from contacts list to send message")
 
 
-    recipient.add_argument("-T", "--to_manual_chat",
+    recipient.add_argument("-C", "--to_manual_chat",
                            metavar = "<chat id>",
-                           dest = "sending_chat_id",
+                           dest = "chat_id",
                            type = int,
-                           default = default_chat,
-                           help = "chat_id to send message")
+                           help = "manual provided chat_id to send message")
+
+    packages = message_handler_parser.add_argument_group()
+
+    packages.add_argument("-m", "--message",
+                          metavar = "message",
+                          dest = "messages",
+                          nargs = "+",
+                          action = "extend",
+                          default = [],
+                          help = "send message(s) to chat")
 
 
-    message_handler_parser.add_argument("-m", "--message",
-                                        metavar = "message",
-                                        dest = "sending_messages",
-                                        nargs = "+",
-                                        help = "send message(s) to chat")
+    packages.add_argument("-d", "--document",
+                          metavar = "file",
+                          dest = "documents",
+                          nargs = "+",
+                          action = "extend",
+                          default = [],
+                          help = "send file(s) to chat")
 
 
-    message_handler_parser.add_argument("-d", "--document",
-                                        metavar = "file",
-                                        dest = "sending_documents",
-                                        nargs = "+",
-                                        help = "send file(s) to chat")
-
-
-    message_handler_parser.add_argument("-a", "--audio",
-                                        metavar = "audiofile",
-                                        dest = "sending_audiofiles",
-                                        nargs = "+",
-                                        help = "send audiofile(s) to chat")
+    packages.add_argument("-a", "--audio",
+                          metavar = "audiofile",
+                          dest = "audiofiles",
+                          nargs = "+",
+                          action = "extend",
+                          default = [],
+                          help = "send audiofile(s) to chat")
 
 
     # parser for creating contacts file, API key is optional
     creation_file_parser = subparsers.add_parser("create", help = "create contacts file")
 
-    creation_file_parser.add_argument("-A", "--api_key",
+    creation_file_parser.add_argument("-k", "--api_key",
                                       metavar = "API-key",
                                       dest = "creation_api_key",
                                       type = str,
@@ -432,7 +1366,7 @@ def main():
                         nargs = 2,
                         help = "add contact with followed chat-number to contacts")
 
-    editor.add_argument("-R", "--remove",
+    editor.add_argument("--remove",
                         metavar = "<chat name>",
                         dest = "editor_remove",
                         help = "remove saved contacts")
@@ -444,7 +1378,7 @@ def main():
     get_id_parser.add_argument("-A", "--api_key",
                                metavar = "API-key",
                                dest = "get_id_api_key",
-                               default = bot_api_key,
+                             #  default = ,
                                help = "use this API to get chat, or, by default will be taken from contacts file")
 
 
@@ -467,88 +1401,68 @@ def main():
 
 
     # call functions by argument command
+    print(args)
 
     if args.command == "create":
-        contacts_creator(api_key = args.creation_api_key)
+        ContactsFile.create(api_key = args.creation_api_key)
 
     elif args.command == "getid":
-        get_id(api_key = args.get_id_api_key, searching_username = args.get_id_by_username, searching_text = args.get_id_by_text)
+        print(Colorize(text = "function not ready", color = yellow, bold = True))
+        # get_id(api_key = args.get_id_api_key, searching_username = args.get_id_by_username, searching_text = args.get_id_by_text)
 
     elif args.command == "list":
-        contacts_show()
+        ContactsFile.print_values()
 
     elif args.command == "contacts":
         contacts_editor(chat_add = args.editor_add, chat_remove = args.editor_remove)
 
-
-
     elif args.command == "send":
 
-        extracted_chat_id = None
+        '''
+        IMPORTANT NOTE:
+        I checked documentation for argparse module, and have to mark 2 points:
+        1) If i understood correctly, add_mutally_exclusive_group will be removed in python 3.11 (my current version - 3.10)
+        So for next version of this module I have to found some other solution
+        2) add_mutually_exclusive_group not support deleting or switching to None argument with default value, even if another argument for this group
+        is provided by user. That creates a bug: I expect one or another key, but both keys with no-None values are provided.
+        (raw api-key OR name of saved api-key, and the same for chat, in case of this script)
 
-        if (args.sending_chat_id == None and args.sending_chat_name == None):
-            print(ColorString(color = "red", text = f"missed chat name or chat id"))
+        Therefore, I use new variables based on args, and call Message.handler with not directly provided keys from argument parser, as I wanted first.
+        BULLSHIT
 
-        if args.sending_bot_api == None:
-            print(ColorString(color = "red", text = f"missed bot's API"))
+        '''
 
-        if args.sending_chat_id != None:
-            extracted_chat_id = args.sending_chat_id
+        s_api_key = args.api_key
+        s_api_key_name = args.api_key_name
 
-        elif args.sending_chat_name != None and contacts_file_exists:
+        if not s_api_key and not s_api_key_name:
+            s_api_key_name = "default"
 
-            try:
-                extracted_chat_id = saved_contacts[args.sending_chat_name]
+        s_chat_id = args.chat_id
+        s_chat_name = args.chat_name
 
-            except KeyError:
-                print(ColorString(color = "red", text = f"contact \"{args.sending_chat_name}\" not found"))
+        if not s_chat_id and not s_chat_name:
+            s_chat_name = "default"
 
-        elif args.sending_chat_name != None and not contacts_file_exists:
-            print(ColorString(color = "red", text = "contact file not found"))
+        # END OF BULLSHIT
 
-        else:
-            print(ColorString(color = "cian", text = "some unexpected problem with extracting arguments for send subcommand"))
-            print(args)
-            exit()
-
-        message_handler(api_key = args.sending_bot_api, chat_id = extracted_chat_id, messages = args.sending_messages, documents = args.sending_documents, audiofiles = args.sending_audiofiles)
-
-
+        exit_status = Handler.dispatcher_wrapper(api_key = s_api_key,
+                                                 api_key_name = s_api_key_name,
+                                                 chat_id = s_chat_id,
+                                                 chat_name = s_chat_name,
+                                                 messages = args.messages,
+                                                 documents = args.documents,
+                                                 audiofiles = args.audiofiles)
 
     else:
-        print(ColorString(color = "yellow", text = 'No command specified. Use --help for more information.'))
+        print(Colorize(color = "yellow", text = 'No command specified. Use --help for more information.'))
 
-    exit()
+    return exit_status
+
 
 # -------------------------------------------------- lets start this shit -------------------------------------------------- #
 
 if __name__ == "__main__":
-    main()
-
-# -------------------------------------------------------- old shit -------------------------------------------------------- #
-
-
-# elif args.command == 'delete':
-#     url = f'https://api.telegram.org/bot{api_key}/deleteMessage'
-#     params = {
-#         'chat_id': args.chat_id,
-#         'message_id': args.message_id,
-#     }
-#     response = requests.post(url, data=params)
-#     if response.status_code == 200:
-#         print('Message deleted successfully')
-#     else:
-#         print(f'Error deleting message: {response.content}')
-
-
-# # delete command
-# delete_parser = subparsers.add_parser('delete', help='delete a message')
-# delete_parser.add_argument('--chat_id', type=int, required=True, help='Chat ID')
-# delete_parser.add_argument('--message_id',
-
-# need to repair getid function, it returns nothing, if you call it like "tgsend getid -A "some unrealistic api"".
-
-# mb re-write ColorString, but donno, probably its not a good idea, to ruin a good working class
-
-
+    exit_status = main()
+    sys.exit(exit_status)
 
