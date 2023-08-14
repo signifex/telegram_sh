@@ -135,15 +135,63 @@ class Colorize:
 
 class ModuleBaseException(Exception):
 
-    def __init__(self, original_exception, additional: Optional[str] = None):
+    """
+    ModuleBaseException is the foundational exception class for custom exceptions in this module.
+
+    It's designed to capture and store detailed information about exceptions,
+    making it easier to handle, log, and report errors. Child exceptions derived
+    from this class can provide more specific error contexts or messages.
+
+    Attributes:
+        original_exception: The original exception that triggered the custom exception.
+        error_name: A string representing the context or part of the module where the error occurred.
+        error_message: A general error message that provides context about the error.
+        logging_string: A formatted string suitable for logging that combines all the details.
+
+    Usage:
+        This class is intended to be subclassed for specific exception types and
+        should not be raised directly. When creating a child exception,
+        provide the original exception and an optional custom message to the
+        initializer. When handling the exception, you can access its attributes
+        for custom error reporting or logging.
+
+        Example:
+            ...
+            class CustomError(ModuleBaseException):
+                super().__init__(original_exception, "error name")
+            ...
+
+            try:
+                1/0
+            except ZeroDivisionError as e:
+                raise CustomError(e) from e
+            ...
+
+            try:
+               (call function with last try-catch block)
+            except ModuleBaseException as e:
+                print(e)
+                print(e.log)
+                logger.error(e.traceback)
+            ...
+
+    Note:
+        Catching `ModuleBaseException` in error handlers will also catch all
+        its child exceptions.
+    """
+
+    def __init__(self, original_exception: Exception, error_name: str):
         super().__init__(str(original_exception))
 
-        logging.info(f"{str(self)}")
+        # Store the attributes
+        self.original_exception = original_exception
+        self.name = error_name
+        self.message = str(original_exception)
+        self.traceback = ''.join(traceback.format_exception(type(original_exception), original_exception, original_exception.__traceback__))
+        self.log = "\n".join(("\n" + datetime.datetime.now().strftime("%Y.%m.%d %H:%M:%S"), self.__str__(), self.traceback))
 
-        if additional:
-            logging.info(additional)
-
-        logging.info(traceback.format_exc())
+    def __str__(self):
+        return f"{self.name}: {self.message}"
 
 
 class Utilities:
@@ -153,6 +201,11 @@ class Utilities:
     Checkers to prevent errors.
     Timestamp to get unique key for dictionaries.
     '''
+
+    class CheckFailed(ModuleBaseException):
+        def __init__(self, original_exception):
+            super().__init__(original_exception, "Check failed")
+
 
     def check_api_key(api_key: str) -> NoReturn:
         url = f"https://api.telegram.org/bot{api_key}/getMe"
@@ -166,8 +219,9 @@ class Utilities:
 
             logger.info("API-key's check passed")
 
-        except urllib.error.URLError:
-            raise urllib.error.URLError("need to re-check internet connection")
+        except (urllib.error.URLError, ValueError) as e:
+            raise CheckFailed(e) from e
+
 
     def check_files(packets: List[str]) -> NoReturn:
 
@@ -188,8 +242,9 @@ class Utilities:
                 fucked_up_packages[packet] = "File must be not empty and less than 50 MB"
 
         if fucked_up_packages:
-            error = "\n".join([f"{key}: {value}" for key, value in fucked_up_packages.items()])
-            raise ValueError(error)
+            error = "\n" + "\n".join([f"{key}: {value}" for key, value in fucked_up_packages.items()])
+            raise CheckFailed(ValueError(error))
+
 
     def check_audiofiles(packets: List[str]) -> NoReturn:
 
@@ -215,8 +270,8 @@ class Utilities:
                 fucked_up_packages[packet] = f"File must be: {allowed_formats}"
 
         if fucked_up_packages:
-            error = "\n".join([f"{key}: {value}" for key, value in fucked_up_packages.items()])
-            raise ValueError(error)
+            error = "\n" + "\n".join([f"{key}: {value}" for key, value in fucked_up_packages.items()])
+            raise CheckFailed(ValueError(error))
 
     def get_timestamp() -> str:
         return datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S_%f")
@@ -238,6 +293,10 @@ class SendingConfigs:
     Only obj.api_key_name can be changed.
     '''
 
+    api_key = property(_get_api_key)
+
+    recipients = property(_get_recipients)
+
     def __init__(self,
                  api_key: str,
                  recipients: Iterable[int],
@@ -247,19 +306,16 @@ class SendingConfigs:
         self.api_key_name = api_key_name
         self._recipients = recipients.copy() if isinstance(recipients, dict) else dict.fromkeys(recipients)
 
-        logger.info(f"data for sending messages is formed, length: {len(self._recipients)}")
+        logger.info(f"Data for sending messages is formed, amount of recipients: {len(self._recipients)}")
 
         return self
 
     def _get_api_key(self) -> Tuple[str, str]:
         return self._api_key, self.api_key_name
 
-    api_key = property(_get_api_key)
 
     def _get_recipients(self) -> Dict:
         return self._recipients
-
-    recipients = property(_get_recipients)
 
 
     def manual_api_key(self, new_api_key: str):
@@ -268,7 +324,7 @@ class SendingConfigs:
         Will raise an error, if value of API-key is already set.
         '''
         if api_key:
-            error = f"Replacing of existing key is not possible"
+            error = f"Replacing an existing api-key is not possible"
             raise AttributeError(error)
 
         else:
@@ -327,52 +383,136 @@ class ContactsFile:
 
     RESERVED_NAMES = set(_structure).union(_key_structure)
 
-    '''
-    see __init__ in ModuleBaseException class for explanations
-    group all predicted errors from create function
-    '''
 
-    class FileCreatingError(ModuleBaseException):
-        def __str__(self):
-            error = Colorize(text = "File creating error: ", color = "red")
-            return error + str(self.args[0])
+    class CreatingError(ModuleBaseException):
+        def __init__(self, original_exception):
+            super().__init__(original_exception, "File creating error")
 
 
-    class FileEditingError(ModuleBaseException):
-        def __str__(self):
-            error = Colorize(text = "File editing error: ", color = "red")
-            return error + str(self.args[0])
+    class FileCorruptedError(ModuleBaseException):
+        def __init__(self, original_exception):
+            super().__init__(original_exception, "File corrupted")
+
+
+    class SavingError(ModuleBaseException):
+        def __init__(self, original_exception):
+            super().__init__(original_exception, "File not saved")
+
+
+    class LoadingError(ModuleBaseException):
+        def __init__(self, original_exception):
+            super().__init__(original_exception, "File not loaded")
 
 
     class ReservedValueError(Exception):
         def __str__(self):
-             error = "This values are reserved: " + ", ".join(ContactsFile.RESERVED_NAMES)
-             return error + ", ".join(ContactsFile.RESERVED_NAMES)
-
-
-    class FileCorruptedError(Exception):
-        def __str__(self):
-            error = "ContactsFile found but corrupted"
+            error = "This values are reserved: " + ", ".join(ContactsFile.RESERVED_NAMES)
             return error
 
 
-    class ContactsFileExistsError(FileExistsError):
-        def __init__(self, message = None):
-            if message is None:
-                message = f"File '{ContactsFile._path}' already exists"
-            super().__init__(message)
+    class Copy:
+
+        class DecryptionError(ModuleBaseException):
+            def __init__(self, original_exception):
+                super().__init__(original_exception, "Decryption error")
+
+        class EncryptionError(ModuleBaseException):
+            def __init__(self, original_exception):
+                super().__init__(original_exception, "Encryption error")
+
+        def decrypt(file_path: Optional[str] = "tgsend.contacts.decrypted",
+                    file_key: Optional[bytes] = FILE_KEY,
+                    force_mode: Optional[bool] = False,
+                    )-> NoReturn:
+
+            contact_file = ContactsFile._load(file_key = file_key)
+
+            if not force_mode and os.path.exists(file_path):
+                raise DecryptionError(FileExistsError(f"File '{file_path}' already exists. Use force mode to overwrite."))
+
+            try:
+                with open(file_path, "w") as copy:
+                    json.dump(contact_file, copy)
+                logger.info("File decrypted")
+
+            except (FileNotFoundError, IOError) as e:
+                raise DecryptionError(e) from e
 
 
-    class FileSavingError(ModuleBaseException):
-        def __str__(self):
-            error = Colorize(text = "File saving error: ", color = "red")
-            return error + str(self.args[0])
+        def encrypt(file_path: str,
+                    file_key: Optional[bytes] = FILE_KEY
+                    ) -> NoReturn:
+
+            try:
+                with open(file_path, "r") as copy:
+                    contact_file = json.load(copy)
+                ContactsFile._save(contact_file, file_key=file_key)
+                logger.info("File encrypted")
+
+            except (FileNotFoundError, IOError, json.JSONDecodeError) as e:
+                raise EncryptionError(e) from e
 
 
-    class FileLoadingError(ModuleBaseException):
-        def __str__(self):
-            error = Colorize(text = "File loading error: ", color = "red")
-            return error + str(self.args[0])
+    class Edit:
+
+        '''
+        Edit contacts file
+
+        '''
+
+        class EditingError(ModuleBaseException):
+            def __init__(self, original_exception):
+                super().__init__(original_exception, "File editing error")
+
+
+        def add_api_key(api_key_name: str,
+                        api_key: Optional[str] = None,
+                        file_key: Optional[bytes] = FILE_KEY,
+                        set_default: Optional[bool] = False,
+                        force_mode: Optional[bool] = False,
+                        autoconfirm: Optional[bool] = False,
+                        ) -> NoReturn:
+
+            contacts_dict = ContactsFile._load()
+
+            if api_key_name in ContactsFile.RESERVED_NAMES:
+                raise EditingError(ContactsFile.ReservedValueError)
+
+            if not force_mode:
+
+                if api_key_name in contacts_dict:
+                    error = ValueError("API-key with this name already exists, use force-mode to overwrite")
+                    raise EditingError(error)
+
+                elif api_key is None:
+                    error = ValueError("API-key is not provided, use force mode to save key without value")
+                    raise EditingError(error)
+
+                Utilities.check_api_key(api_key = api_key)
+
+            if api_key is None and not autoconfirm:
+
+                while True:
+                    action = input("Save empty API-key? (y/N)")
+
+                    if not action or action.lower() == "n":
+                        error = KeyboardInterrupt("Operation aborted by user")
+                        raise EditingError(error)
+
+                    elif action.lower() == "y":
+                        break
+
+            contacts_dict[api_key_name] = ContactsFile._key_structure
+            contacts_dict[api_key_name]["api_key"] = api_key
+
+            if set_default:
+                contacts_dict["default"] = api_key_name
+
+            cls._save(contacts_dict)
+
+            api_is_none = ", the key value is empty" if api_key is None else ""
+            is_default = ", set as default" if set_default else ""
+            logger.info(f"api-key key {api_key_name} saved" + api_is_none + is_default)
 
 
     @classmethod
@@ -403,7 +543,7 @@ class ContactsFile:
         try:
 
             if not force_mode and os.path.exists(cls._path):
-                raise cls.ContactsFileExistsError
+                raise FileExistsError(f"file {cls._path} already exists, use force mode to overwrite or delete manually")
 
             if api_key is None and not autoconfirm:
 
@@ -420,393 +560,10 @@ class ContactsFile:
             print("Contacts file successfully created")
 
         except (cls.ReservedValueError, FileExistsError) as e:
-            raise cls.FileCreatingError(e)
+            raise cls.CreatingError(e) from e
 
         except KeyboardInterrupt:
-            raise cls.FileCreatingError("Operation aborted by user")
-
-        except Exception as e:
-            file_name = Utilities.get_timestamp() + ".log"
-            error = "Unexpected error during contacts file creation: " + str(e)
-
-            with open(file_name, "w") as output:
-                output.write(error + "\n" + traceback.format_exc())
-
-            print(f"file '{file_name}' contains error traceback log")
-            raise
-
-
-    class Copy:
-
-        class DecryptionError(ModuleBaseException):
-            def __str__(self):
-                error = "Decryption Error: "
-                return error + str(self.args[0])
-
-        class EncryptionError(ModuleBaseException):
-            def __str__(self):
-                error = "Encryption Error: "
-                return error + str(self.args[0])
-
-        def decrypt(file_path: Optional[str] = "tgsend.contacts.decrypted",
-                    file_key: Optional[bytes] = FILE_KEY,
-                    force_mode: Optional[bool] = False,
-                    )-> NoReturn:
-
-            contact_file = ContactsFile._load(file_key = file_key)
-
-            if not force_mode and os.path.exists(file_path):
-                raise DecryptionError(f"File '{file_path}' already exists. Use --force to owerwrite.")
-
-            try:
-                with open(file_path, "w") as copy:
-                    json.dump(contact_file, copy)
-                logger.info("File decrypted")
-
-            except (FileNotFoundError, IOError) as e:
-                raise DecryptionError(e)
-
-            except Exception as e:
-                file_name = Utilities.get_timestamp() + ".log"
-                error_message = f"Unexpected error during decryption of '{file_path}': " + str(e)
-                with open(file_name, "w") as output:
-                    output.write(error_message + "\n" + traceback.format_exc())
-                print(f"File '{file_name}' contains error traceback log")
-                raise
-
-
-        def encrypt(file_path: str, file_key: Optional[bytes] = FILE_KEY) -> NoReturn:
-
-            try:
-                with open(file_path, "r") as copy:
-                    contact_file = json.load(copy)
-                ContactsFile._save(contact_file, file_key=file_key)
-                logger.info("File encrypted")
-
-            except (FileNotFoundError, IOError, json.JSONDecodeError) as e:
-                raise EncryptionError(e)
-
-            except Exception as e:
-                file_name = Utilities.get_timestamp() + ".log"
-                error_message = f"Unexpected error during encryption of '{file_path}': " + str(e)
-                with open(file_name, "w") as output:
-                    output.write(error_message + "\n" + traceback.format_exc())
-                print(f"file '{file_name}' contains error traceback log")
-                raise
-
-
-
-    class Edit:
-
-        '''
-        Edit contacts file
-
-        '''
-
-
-        def add_api_key(api_key_name: str,
-                        api_key: Optional[str] = None,
-                        file_key: Optional[bytes] = FILE_KEY,
-                        set_default: Optional[bool] = False,
-                        force_mode: Optional[bool] = False,
-                        autoconfirm: Optional[bool] = False,
-                        ) -> NoReturn:
-
-            if api_key_name in ContactsFile.RESERVED_NAMES:
-                logger.info("invalid api_key_name value")
-                raise ContactsFile.ReservedValueError
-
-            contacts_dict = ContactsFile._load()
-
-            if not force_mode and api_key_name in contacts_dict:
-
-
-
-                contacts_dict[api_key_name] = ContactsFile._key_structure
-                contacts_dict[api_key_name]["api_key"] = api_key
-                message = Colorize(text = f"api-key {api_key_name} seccessfully added", color = "green")
-
-
-            try:
-
-            elif api_key_name in contacts_dict.keys():
-                error = "API-key with this name already exists, use force-mode to over-write"
-                raise ValueError(error)
-
-            elif api_key is None and not force_mode:
-                error = "API-key is not provided, use force_mode to save key without value"
-                raise ValueError(error)
-
-            else:
-                contacts_dict[api_key_name] = ContactsFile._key_structure
-                contacts_dict[api_key_name]["api_key"] = api_key
-                cls._save(contacts_dict)
-                message = Colorize(text = f"api-key {api_key_name} seccessfully added", color = "green")
-                print(message)
-
-
-
-
-        contacts_dict = cls._structure
-        contacts_dict[api_key_name] = cls._key_structure
-
-        if set_default:
-            contacts_dict["default"] = api_key_name
-
-        if api_key:
-            if api_key in cls.RESERVED_NAMES:
-                raise cls.ReservedValueError
-
-            contacts_dict[api_key_name]["api_key"] = api_key
-
-        try:
-
-            if not force_mode and os.path.exists(cls._path):
-                raise cls.ContactsFileExistsError
-
-            if api_key is None and not autoconfirm:
-
-                while True:
-                    action = input("Save empty API-key? (y/N)")
-
-                    if not action or action.lower() == "n":
-                        raise KeyboardInterrupt
-
-                    elif action.lower() == "y":
-                        break
-
-            cls._save(contacts_dict)
-            print("Contacts file successfully created")
-
-        except (cls.ReservedValueError, FileExistsError) as e:
-            raise cls.FileCreatingError(e)
-
-        except KeyboardInterrupt:
-            raise cls.FileCreatingError("Operation aborted by user")
-
-        except Exception as e:
-            file_name = Utilities.get_timestamp() + ".log"
-            error = "Unexpected error during contacts file creation: " + str(e)
-
-            with open(file_name, "w") as output:
-                output.write(error + "\n" + traceback.format_exc())
-
-            print(f"file '{file_name}' contains error traceback log")
-            raise
-
-
-
-    class AddContacts:
-
-        class Message(NamedTuple):
-            chat_id: int
-            username: str
-            first_name: str
-            text: str
-
-
-        @classmethod
-        def from_updates(cls,
-                         api_key_name: str,
-                         api_key: str = None,
-                         filter_username: str = None,
-                         filter_text: str = None) -> NoReturn:
-
-            contacts_dict = super()._load()
-
-            if api_key_name not in contacts_dict.keys():
-                error = f"api-key '{api_key_name}' is not exists in contacts file"
-                raise ValueError(error)
-
-            if api_key is not None:
-                api_key = contacts_dict[api_key_name]["api_key"]
-                logger.info("api key taken from contacs file")
-
-            Utilities.check_api_key(api_key)
-
-
-        def _get_updates(api_key: str) -> List:
-
-            url = f'https://api.telegram.org/bot{api_key}/getUpdates'
-
-            logger.info("Getting updates from Telagram server")
-
-            try:
-
-                with urllib.request.urlopen(url) as response_raw:
-                    response = json.loads(response_raw.read())
-
-                if not response.get("ok"):
-                    error = "Wrong API-call"
-                    raise ValueError(error)
-
-                elif response["result"] == []:
-                    error = "no updates, send some message to bot, and try again"
-                    raise ValueError(error)
-
-                logger.info("returing data from Telegram server")
-                return response["result"]
-
-            except Exception as e:
-              error = "error retrieving data from Telegram server: " + e.args[0]
-              raise Exception(error)
-
-
-        def _format_messages(messages: list[Message]) -> list[Message]:
-
-            '''
-            get "result" friom Telagram, extact values and form Message class from each message
-            '''
-            logger.info("messages formating starts")
-
-            formated_messages_dict = {}
-
-            for message in messages:
-
-                shortcut = message["message"]["from"]
-
-                chat_id = shortcut["id"]
-                username = shortcut.get("username", "NOUSERNAME")
-                first_name = shortcut.get("first_name", "NOFIRSTNAME")
-                text = message["message"].get("text", "")
-
-                '''
-                formated_messages_dict[chat_id] = Message(chat_id=chat_id, username=username, first_name=first_name, text=text)
-                should be modified to use formated_messages_dict[chat_id] as the key inside the NamedTuple.
-                It should be formated_messages_dict[chat_id] = Message(message.chat_id, username, first_name, text).
-
-                '''
-                formated_messages_dict[chat_id] = Message(chat_id = chat_id, username = username,
-                                                          first_name = first_name, text = text)
-
-            formated_messages = formated_messages_dict.values()
-
-            logger.info(f"returning {len(formated_messages)} messages")
-            return formated_messages
-
-
-        def _filter_messages(messages: List[Message],
-                             existing_chat_id: List[int],
-                             filter_username: str = None,
-                             filter_text: str = None
-                             ) -> list[Message]:
-
-            '''
-            filter each Message according:
-            1) not in dictionary
-            2) from username
-            3) contains right message
-            '''
-            logger.info(f"Start filtering messages, filter by username: {filter_username}, filter by text: {filter_text}")
-
-            filtered_messages = []
-
-            for message in messages:
-
-                if message.chat_id in existing_chat_id:
-                    logger.info(f"{message.chat_id} already in contacts file")
-                    continue
-
-                elif filter_text != None and message.text != filter_text:
-                    logger.info(f"{message.text} from {message.username}({message.chat_id}) not matches to {filter_text}")
-                    continue
-
-                elif filter_username != None and message.username not in (filter_username, "NOUSERNAME"):
-                    logger.info(f"{message.username}({message.chat_id}) not matches to {filter_username}")
-                    continue
-
-                else:
-                    filtered_messages.append(message)
-
-            logger.info(f"returning {len(filtered_messages)} filtered messages")
-
-            return filtered_messages
-
-
-        def _check_messages(messages: list[Message], existing_contacts: Dict[str, int]) -> NoReturn:
-
-            logger.info("starting checking of messages")
-
-            existing_contacts = existing_contacts.copy()
-
-            c_message = Colorize(text = f"There are {len(messages)} contacts to check", color = "green")
-            print(c_message)
-
-            for message in messages[:]:
-
-                chat_id = message.chat_id
-                username = message.username
-                full_text = message.text
-                text = (full_text[:50] + "...") if len(full_text) > 50 else full_text
-
-                if chat_id in existing_contacts.values():
-                    existing_username = next(key for key, value in existing_contacts.items() if value == chat_id)
-                    c_message = Colorize(text=f"'{username}' already saved in contacts file as '{existing_username}', skipped", color="yellow")
-                    print(c_message)
-                    messages.remove(message)
-
-                else:
-
-                    try:
-
-                        contact_not_processed = True
-
-                        while contact_not_processed:
-
-                            action = input(f"'{username}': {text}\nAdd '{username}' (Y/n)? ")
-
-                            if action.lower() in ("y", ""):
-
-                                while contact_not_processed:
-
-                                    if username in existing_contacts:
-                                        new_username = input(f"Enter a contact name for (name '{username}' already set to another contact):\n")
-
-                                    else:
-                                        new_username = input(f"Enter a new username for '{username}' (or press Enter to keep the username):\n")
-                                        new_username = username if new_username == "" else new_username
-
-                                    if len(new_username) < 3:
-                                        c_message = Colorize(text = "Contact's name is too short", color = "red")
-                                        print(c_message)
-
-                                    else:
-                                        confirm = input(f"Add contact with username '{new_username}'? (Y/n): ")
-
-                                        while contact_not_processed:
-
-                                            if not confirm or confirm.lower() == "y":
-                                                c_message = Colorize(text=f"Adding contact: {new_username}", color="green")
-                                                existing_contacts[new_username] = message.chat_id
-                                                messages.remove(message)
-                                                print(c_message)
-                                                contact_not_processed = False
-                                                break
-
-                                            elif confirm.lower() == "n":
-                                                break
-
-                                            else:
-                                                c_message = Colorize(text = "Wrong input", color = "red")
-                                                print(c_message)
-
-
-                            elif action.lower() == "n":
-                                c_message = Colorize(text = f"Username '{username}' skipped", color = "yellow")
-                                print(c_message)
-                                messages.remove(message)
-                                break
-
-
-                            else:
-                                c_message = Colorize(text = "Wrong input", color = "red")
-                                print(c_message)
-
-                    except KeyboardInterrupt:
-                        messages.remove(message)
-                        c_message = Colorize(text = f"\n'{username}' skipped", color = "yellow")
-                        print(c_message)
-
+            raise cls.CreatingError(KeyboardInterrupt("Operation aborted by user"))
 
 
     @classmethod
@@ -971,6 +728,222 @@ class ContactsFile:
             print("Recipients list is leer")
 
         return SendingConfigs(api_key = api_key, api_key_name = api_key_name, recipients = recipients)
+
+
+
+
+class GetContacts(ContactsFile):
+
+    class Message(NamedTuple):
+        chat_id: int
+        username: str
+        first_name: str
+        text: str
+
+        
+    @classmethod
+    def from_updates(cls,
+                     api_key_name: str,
+                     api_key: str = None,
+                     filter_username: str = None,
+                     filter_text: str = None) -> NoReturn:
+
+        contacts_dict = super()._load()
+
+        if api_key_name not in contacts_dict:
+            error = f"api-key '{api_key_name}' is not exists in contacts file"
+            raise ValueError(error)
+
+        if api_key is not None:
+            api_key = contacts_dict[api_key_name]["api_key"]
+            logger.info("api key taken from contacs file")
+
+        Utilities.check_api_key(api_key)
+
+
+    def _get_updates(api_key: str) -> List:
+
+        url = f'https://api.telegram.org/bot{api_key}/getUpdates'
+
+        logger.info("Getting updates from Telagram server")
+
+        try:
+
+            with urllib.request.urlopen(url) as response_raw:
+                response = json.loads(response_raw.read())
+
+            if not response.get("ok"):
+                error = "Wrong API-call"
+                raise ValueError(error)
+
+            elif response["result"] == []:
+                error = "no updates, send some message to bot, and try again"
+                raise ValueError(error)
+
+            logger.info("returing data from Telegram server")
+            return response["result"]
+
+        except Exception as e:
+          error = "error retrieving data from Telegram server: " + e.args[0]
+          raise Exception(error)
+
+
+    def _format_messages(messages: list[Message]) -> list[Message]:
+
+        '''
+        get "result" friom Telagram, extact values and form Message class from each message
+        '''
+        logger.info("messages formating starts")
+
+        formated_messages_dict = {}
+
+        for message in messages:
+
+            shortcut = message["message"]["from"]
+
+            chat_id = shortcut["id"]
+            username = shortcut.get("username", "NOUSERNAME")
+            first_name = shortcut.get("first_name", "NOFIRSTNAME")
+            text = message["message"].get("text", "")
+
+            '''
+            formated_messages_dict[chat_id] = Message(chat_id=chat_id, username=username, first_name=first_name, text=text)
+            should be modified to use formated_messages_dict[chat_id] as the key inside the NamedTuple.
+            It should be formated_messages_dict[chat_id] = Message(message.chat_id, username, first_name, text).
+
+            '''
+            formated_messages_dict[chat_id] = Message(chat_id = chat_id, username = username,
+                                                      first_name = first_name, text = text)
+
+        formated_messages = formated_messages_dict.values()
+
+        logger.info(f"returning {len(formated_messages)} messages")
+        return formated_messages
+
+
+    def _filter_messages(messages: List[Message],
+                         existing_chat_id: List[int],
+                         filter_username: str = None,
+                         filter_text: str = None
+                         ) -> list[Message]:
+
+        '''
+        filter each Message according:
+        1) not in dictionary
+        2) from username
+        3) contains right message
+        '''
+        logger.info(f"Start filtering messages, filter by username: {filter_username}, filter by text: {filter_text}")
+
+        filtered_messages = []
+
+        for message in messages:
+
+            if message.chat_id in existing_chat_id:
+                logger.info(f"{message.chat_id} already in contacts file")
+                continue
+
+            elif filter_text != None and message.text != filter_text:
+                logger.info(f"{message.text} from {message.username}({message.chat_id}) not matches to {filter_text}")
+                continue
+
+            elif filter_username != None and message.username not in (filter_username, "NOUSERNAME"):
+                logger.info(f"{message.username}({message.chat_id}) not matches to {filter_username}")
+                continue
+
+            else:
+                filtered_messages.append(message)
+
+        logger.info(f"returning {len(filtered_messages)} filtered messages")
+
+        return filtered_messages
+
+
+    def _check_messages(messages: list[Message], existing_contacts: Dict[str, int]) -> NoReturn:
+
+        logger.info("starting checking of messages")
+
+        existing_contacts = existing_contacts.copy()
+
+        c_message = Colorize(text = f"There are {len(messages)} contacts to check", color = "green")
+        print(c_message)
+
+        for message in messages[:]:
+
+            chat_id = message.chat_id
+            username = message.username
+            full_text = message.text
+            text = (full_text[:50] + "...") if len(full_text) > 50 else full_text
+
+            if chat_id in existing_contacts.values():
+                existing_username = next(key for key, value in existing_contacts.items() if value == chat_id)
+                c_message = Colorize(text=f"'{username}' already saved in contacts file as '{existing_username}', skipped", color="yellow")
+                print(c_message)
+                messages.remove(message)
+
+            else:
+
+                try:
+
+                    contact_not_processed = True
+
+                    while contact_not_processed:
+
+                        action = input(f"'{username}': {text}\nAdd '{username}' (Y/n)? ")
+
+                        if action.lower() in ("y", ""):
+
+                            while contact_not_processed:
+
+                                if username in existing_contacts:
+                                    new_username = input(f"Enter a contact name for (name '{username}' already set to another contact):\n")
+
+                                else:
+                                    new_username = input(f"Enter a new username for '{username}' (or press Enter to keep the username):\n")
+                                    new_username = username if new_username == "" else new_username
+
+                                if len(new_username) < 3:
+                                    c_message = Colorize(text = "Contact's name is too short", color = "red")
+                                    print(c_message)
+
+                                else:
+                                    confirm = input(f"Add contact with username '{new_username}'? (Y/n): ")
+
+                                    while contact_not_processed:
+
+                                        if not confirm or confirm.lower() == "y":
+                                            c_message = Colorize(text=f"Adding contact: {new_username}", color="green")
+                                            existing_contacts[new_username] = message.chat_id
+                                            messages.remove(message)
+                                            print(c_message)
+                                            contact_not_processed = False
+                                            break
+
+                                        elif confirm.lower() == "n":
+                                            break
+
+                                        else:
+                                            c_message = Colorize(text = "Wrong input", color = "red")
+                                            print(c_message)
+
+
+                        elif action.lower() == "n":
+                            c_message = Colorize(text = f"Username '{username}' skipped", color = "yellow")
+                            print(c_message)
+                            messages.remove(message)
+                            break
+
+
+                        else:
+                            c_message = Colorize(text = "Wrong input", color = "red")
+                            print(c_message)
+
+                except KeyboardInterrupt:
+                    messages.remove(message)
+                    c_message = Colorize(text = f"\n'{username}' skipped", color = "yellow")
+                    print(c_message)
+
+
 
 
 class Dispatcher:
