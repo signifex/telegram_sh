@@ -38,6 +38,7 @@ import logging
 import asyncio
 import urllib.request
 import urllib.parse
+import logging
 
 from typing import List, Set, Dict, Tuple, NamedTuple, Literal, Union, Iterable, BinaryIO, Optional, NoReturn
 
@@ -134,8 +135,10 @@ class Colorize:
 
 
 class ModuleBaseException(Exception):
-
     """
+    Base exception class to provide a consistent format for custom exceptions.
+    This class is designed to be subclassed and should not be raised directly.
+
     ModuleBaseException is the foundational exception class for custom exceptions in this module.
 
     It's designed to capture and store detailed information about exceptions,
@@ -143,12 +146,14 @@ class ModuleBaseException(Exception):
     from this class can provide more specific error contexts or messages.
 
     Attributes:
-        original_exception: The original exception that triggered the custom exception.
-        error_name: A string representing the context or part of the module where the error occurred.
-        error_message: A general error message that provides context about the error.
-        logging_string: A formatted string suitable for logging that combines all the details.
+        original_exception (Exception): The original exception that triggered the custom exception.
+                                        If no original exception is provided, it defaults to the custom exception itself.
+        name (str): Name of the exception, typically the class name. Customizable.
+        message (str): Detailed message of the error (or default error's message, will overwrite error's default message!)
+        traceback (str): Stack trace of the error.
+        log (str): Log message that combines the timestamp, error name, message, and traceback.
 
-    Usage:
+   Usage:
         This class is intended to be subclassed for specific exception types and
         should not be raised directly. When creating a child exception,
         provide the original exception and an optional custom message to the
@@ -158,13 +163,14 @@ class ModuleBaseException(Exception):
         Example:
             ...
             class CustomError(ModuleBaseException):
-                super().__init__(original_exception, "error name")
+                def __init__(*args)
+                    super().__init__(args, error_name = "more functional name")
             ...
 
             try:
                 1/0
             except ZeroDivisionError as e:
-                raise CustomError(e) from e
+                raise CustomError(e)
             ...
 
             try:
@@ -180,15 +186,28 @@ class ModuleBaseException(Exception):
         its child exceptions.
     """
 
-    def __init__(self, original_exception: Exception, error_name: str):
-        super().__init__(str(original_exception))
+    def __init__(self,
+                 original_exception: Optional[Exception] = None,
+                 error_name: Optional[str] = None,
+                 error_message: Optional[str] = None):
 
-        # Store the attributes
-        self.original_exception = original_exception
-        self.name = error_name
-        self.message = str(original_exception)
-        self.traceback = ''.join(traceback.format_exception(type(original_exception), original_exception, original_exception.__traceback__))
-        self.log = "\n".join(("\n" + datetime.datetime.now().strftime("%Y.%m.%d %H:%M:%S"), self.__str__(), self.traceback))
+        if self.__class__ == ModuleBaseException:
+            raise NotImplementedError("ModuleBaseException should not be raised directly. Use a subclass instead.")
+
+        self.original_exception = original_exception if original_exception else self
+
+        self.name = error_name if error_name else self.__class__.__name__
+
+        self.message = str(self.original_exception) if original_exception else error_message
+
+        if isinstance(original_exception, Exception):
+            self.traceback = traceback.format_exception(type(original_exception), original_exception, original_exception.__traceback__)
+        else:
+            self.traceback = traceback.format_stack()[:-2]
+
+        self.log = "\n".join(("\n" + Utilities.normal_timestamp(), self.__str__(), ''.join(self.traceback)))
+
+        super().__init__(self.message)
 
     def __str__(self):
         return f"{self.name}: {self.message}"
@@ -203,25 +222,25 @@ class Utilities:
     '''
 
     class CheckFailed(ModuleBaseException):
-        def __init__(self, original_exception):
-            super().__init__(original_exception, "Check failed")
+        def __init__(self, *args):
+            super().__init__(*args, error_name = "Check failed")
 
 
     def check_api_key(api_key: str) -> NoReturn:
         url = f"https://api.telegram.org/bot{api_key}/getMe"
 
         try:
-            response = urllib.request.urlopen(base_url)
+            response = urllib.request.urlopen(url)
             data = json.load(response)
 
             if not data["ok"]:
-                raise ValueError("API-key's check failed")
+                raise ChechFailed("API-key's check failed")
 
-            logger.info("API-key's check passed")
+        except (urllib.error.URLError, urllib.error.HTTPError) as e:
+            raise Utilities.CheckFailed(e) from e
 
-        except (urllib.error.URLError, ValueError) as e:
-            raise CheckFailed(e) from e
-
+        finally:
+            logging.info("API-key's check passed")
 
     def check_files(packets: List[str]) -> NoReturn:
 
@@ -243,7 +262,7 @@ class Utilities:
 
         if fucked_up_packages:
             error = "\n" + "\n".join([f"{key}: {value}" for key, value in fucked_up_packages.items()])
-            raise CheckFailed(ValueError(error))
+            raise Utilities.CheckFailed(error)
 
 
     def check_audiofiles(packets: List[str]) -> NoReturn:
@@ -271,10 +290,14 @@ class Utilities:
 
         if fucked_up_packages:
             error = "\n" + "\n".join([f"{key}: {value}" for key, value in fucked_up_packages.items()])
-            raise CheckFailed(ValueError(error))
+            raise Utilities.CheckFailed(error)
 
-    def get_timestamp() -> str:
+    def key_timestamp() -> str:
         return datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S_%f")
+
+    def normal_timestamp() -> str:
+        return datetime.datetime.now().strftime("%Y.%m.%d %H:%M:%S")
+
 
 
 class SendingConfigs:
@@ -293,9 +316,9 @@ class SendingConfigs:
     Only obj.api_key_name can be changed.
     '''
 
-    api_key = property(_get_api_key)
-
-    recipients = property(_get_recipients)
+    class CreatingError(ModuleBaseException):
+        def __init__(self, *args):
+            super().__init__(*args, error_name = "Configurations for sending are not set")
 
     def __init__(self,
                  api_key: str,
@@ -313,10 +336,12 @@ class SendingConfigs:
     def _get_api_key(self) -> Tuple[str, str]:
         return self._api_key, self.api_key_name
 
+    api_key = property(_get_api_key)
 
     def _get_recipients(self) -> Dict:
         return self._recipients
 
+    recipients = property(_get_recipients)
 
     def manual_api_key(self, new_api_key: str):
         '''
@@ -385,40 +410,41 @@ class ContactsFile:
 
 
     class CreatingError(ModuleBaseException):
-        def __init__(self, original_exception):
-            super().__init__(original_exception, "File creating error")
+        def __init__(self, *args):
+            super().__init__(*args, error_name = "File creating failed")
 
 
     class FileCorruptedError(ModuleBaseException):
-        def __init__(self, original_exception):
-            super().__init__(original_exception, "File corrupted")
+        def __init__(self, *args):
+            super().__init__(*args, error_name = "File corrupted")
 
 
     class SavingError(ModuleBaseException):
-        def __init__(self, original_exception):
-            super().__init__(original_exception, "File not saved")
+        def __init__(self, *args):
+            super().__init__(*args, error_name = "File not saved")
 
 
     class LoadingError(ModuleBaseException):
-        def __init__(self, original_exception):
-            super().__init__(original_exception, "File not loaded")
+        def __init__(self, *args):
+            super().__init__(*args, error_name = "File not loaded")
 
 
-    class ReservedValueError(Exception):
-        def __str__(self):
-            error = "This values are reserved: " + ", ".join(ContactsFile.RESERVED_NAMES)
-            return error
-
+    class ReservedValueError(ModuleBaseException):
+        def __init__(self, *args):
+            error_name = "Invalid value error, these values are reserved: " + ", ".join(ContactsFile.RESERVED_NAMES)
+            super().__init__(self, *args, error_name = error_name)
 
     class Copy:
 
         class DecryptionError(ModuleBaseException):
-            def __init__(self, original_exception):
-                super().__init__(original_exception, "Decryption error")
+            def __init__(self, *args):
+                super().__init__(*args, error_name = "Decryption error")
+
 
         class EncryptionError(ModuleBaseException):
-            def __init__(self, original_exception):
-                super().__init__(original_exception, "Encryption error")
+            def __init__(self, *args):
+                super().__init__(*rgs, error_name = "Encryption error")
+
 
         def decrypt(file_path: Optional[str] = "tgsend.contacts.decrypted",
                     file_key: Optional[bytes] = FILE_KEY,
@@ -427,17 +453,21 @@ class ContactsFile:
 
             contact_file = ContactsFile._load(file_key = file_key)
 
-            if not force_mode and os.path.exists(file_path):
-                raise DecryptionError(FileExistsError(f"File '{file_path}' already exists. Use force mode to overwrite."))
+            mode = "w+" if force_mode else "w"
 
             try:
                 with open(file_path, "w") as copy:
                     json.dump(contact_file, copy)
-                logger.info("File decrypted")
+
+            except FileExistsError as e:
+                 error_message = f"File '{file_path}' already exists. Use force mode to overwrite."
+                 raise DecryptionError(e, error_message = error_message)
 
             except (FileNotFoundError, IOError) as e:
                 raise DecryptionError(e) from e
 
+            finally:
+                logger.info("File decrypted")
 
         def encrypt(file_path: str,
                     file_key: Optional[bytes] = FILE_KEY
@@ -447,11 +477,12 @@ class ContactsFile:
                 with open(file_path, "r") as copy:
                     contact_file = json.load(copy)
                 ContactsFile._save(contact_file, file_key=file_key)
-                logger.info("File encrypted")
 
             except (FileNotFoundError, IOError, json.JSONDecodeError) as e:
                 raise EncryptionError(e) from e
 
+            finally:
+                logger.info("File encrypted")
 
     class Edit:
 
@@ -481,11 +512,11 @@ class ContactsFile:
             if not force_mode:
 
                 if api_key_name in contacts_dict:
-                    error = ValueError("API-key with this name already exists, use force-mode to overwrite")
+                    error = "API-key with this name already exists, use force-mode to overwrite"
                     raise EditingError(error)
 
                 elif api_key is None:
-                    error = ValueError("API-key is not provided, use force mode to save key without value")
+                    error = "API-key is not provided, use force mode to save key without value"
                     raise EditingError(error)
 
                 Utilities.check_api_key(api_key = api_key)
@@ -496,7 +527,7 @@ class ContactsFile:
                     action = input("Save empty API-key? (y/N)")
 
                     if not action or action.lower() == "n":
-                        error = KeyboardInterrupt("Operation aborted by user")
+                        error = "Operation aborted by user"
                         raise EditingError(error)
 
                     elif action.lower() == "y":
@@ -511,8 +542,8 @@ class ContactsFile:
             cls._save(contacts_dict)
 
             api_is_none = ", the key value is empty" if api_key is None else ""
-            is_default = ", set as default" if set_default else ""
-            logger.info(f"api-key key {api_key_name} saved" + api_is_none + is_default)
+            is_default = ", the key set as default" if set_default else ""
+            logger.info(f"api-key '{api_key_name}' saved" + api_is_none + is_default)
 
 
     @classmethod
@@ -525,8 +556,7 @@ class ContactsFile:
                autoconfirm: Optional[bool] = False
                ) -> NoReturn:
 
-        if api_key_name in cls.RESERVED_NAMES:
-            raise cls.ReservedValueError
+        cls._check_reserved_values(api_key_name)
 
         if not api_key and not force_mode:
             error = "Empty api-key value. Use force-mode to save leer value, or provide valid API-key"
@@ -557,17 +587,18 @@ class ContactsFile:
                         break
 
             cls._save(contacts_dict)
+
             print("Contacts file successfully created")
 
-        except (cls.ReservedValueError, FileExistsError) as e:
-            raise cls.CreatingError(e) from e
+        except (ReservedValueError, FileExistsError) as e:
+            raise CreatingError(e) from e
 
         except KeyboardInterrupt:
-            raise cls.CreatingError(KeyboardInterrupt("Operation aborted by user"))
+            raise CreatingError("Operation aborted by user")
 
 
     @classmethod
-    def _load(cls, file_key = FILE_KEY) -> dict:
+    def _load(cls, file_key = FILE_KEY) -> Dict:
 
         try:
 
@@ -590,24 +621,13 @@ class ContactsFile:
 
             return contacts_dict
 
-        except cls.FileCorruptedError as e:
-            raise e
-
-        except FileNotFoundError:
-            error = f"file not found: {cls._path}"
-            raise FileNotFoundError(error)
-
-        except json.JSONDecodeError:
-            error = f"file not decoded into dictionary: {cls._path}"
-            raise json.JSONDecodeError(error)
-
-        except Exception as e:
-            error = f"error during reading '{cls._path}'" + str(e)
-            raise Exception(error)
-
+        except (cls.FileCorruptedError, FileNotFoundError, json.JSONDecodeError) as e:
+            raise LoadError(e)
 
     @classmethod
-    def _save(cls, new_file, key: bytes = FILE_KEY) -> NoReturn:
+    def _save(cls,
+              new_file: dict,
+              key: bytes = FILE_KEY) -> NoReturn:
 
         json_data = json.dumps(new_file)
 
@@ -620,9 +640,16 @@ class ContactsFile:
         with open(cls._path, "wb") as file:
             file.write(export_data)
 
+    @classmethod
+    def _check_reserved_values(cls, *args: str):
+        error = [arg for arg in args if arg in cls.RESERVED_NAMES]
+        if error:
+            error_message = "provided invalid values: " + ", ".join(*error)
+            raise cls.ReservedValueError(error_message)
+
 
     @classmethod
-    def show_contacts(cls, api_key_name:str) -> NoReturn:
+    def show_contacts(cls, api_key_name: str) -> NoReturn:
 
         contacts_dict = cls._load()
 
@@ -662,17 +689,17 @@ class ContactsFile:
 
         if api_key_name not in contacts_dict.keys():
             error = "name of api-key not found in  contacts file"
-            raise ValueError(error)
+            raise SendingConfigs.CreatingError(error)
 
         elif api_key is not None:
             saved_api_key = contacts_dict[api_key_name][api_key]
             if saved_api_key != "":
                 error = f"another api-key saved to by name '{api_key_name}'"
-                raise ValueError(error)
+                raise SendingConfigs.CreatingError(error)
 
         elif all(arg is None for arg in (searching_chat_names, searching_bulk_groups, manual_id)):
             error = "No recipients specified"
-            raise ValueError (error)
+            raise SendingConfigs.CreatingError(error)
 
         recipients = dict()
         not_found = dict()
@@ -718,7 +745,6 @@ class ContactsFile:
             for key, value in found_contacts.items():
                 recipients.setdefault(key, value)
 
-
         if not_found:
             print("These names not found:")
             for key, value in not_found.items():
@@ -740,7 +766,7 @@ class GetContacts(ContactsFile):
         first_name: str
         text: str
 
-        
+
     @classmethod
     def from_updates(cls,
                      api_key_name: str,
@@ -1023,7 +1049,7 @@ class Dispatcher:
             response_data = response.read().decode("utf-8")
             response_json = json.loads(response_data)
 
-        key = Utilities.get_timestamp()
+        key = Utilities.key_timestamp()
 
         if response_json.get("ok"):
             self._sending_success[key] = f"recipient: {recipient_id}/{recipient_name}"
@@ -1065,7 +1091,7 @@ class Dispatcher:
 
         response = await requests.post(url, data = data, files = open_files)
 
-        key = Utilities.get_timestamp()
+        key = Utilities.key_timestamp()
 
         if response.status_code == 200:
            self._sending_success[key] =  f"recipient: {recipient_id}/{recipient_name}"
