@@ -67,7 +67,7 @@ If you dont want to save api-keys, you can always provide it manually, and not s
 Only api_key_name is required to manage contacts associated with the bot
 '''
 
-# ----------------------------------------------------- set up logger ------------------------------------------------------ #
+# ----------------------------------------------------- set up logging ------------------------------------------------------ #
 
 def logging_level(verbose=False):
 
@@ -178,7 +178,7 @@ class ModuleBaseException(Exception):
             except ModuleBaseException as e:
                 print(e)
                 print(e.log)
-                logger.error(e.traceback)
+                logging.error(e.traceback)
             ...
 
     Note:
@@ -329,7 +329,7 @@ class SendingConfigs:
         self.api_key_name = api_key_name
         self._recipients = recipients.copy() if isinstance(recipients, dict) else dict.fromkeys(recipients)
 
-        logger.info(f"Data for sending messages is formed, amount of recipients: {len(self._recipients)}")
+        logging.info(f"Data for sending messages is formed, amount of recipients: {len(self._recipients)}")
 
         return self
 
@@ -355,7 +355,7 @@ class SendingConfigs:
         else:
             self._api_key = new_api_key
 
-        logger.info("Using manual provided api-key")
+        logging.info("Using manual provided api-key")
         return self
 
 
@@ -370,7 +370,7 @@ class SendingConfigs:
             for recipient in recipients:
                 self._recipients.setdefault(recipients)
 
-        logger.info("Recipients list updated")
+        logging.info("Recipients list updated")
         return self
 
 
@@ -409,30 +409,16 @@ class ContactsFile:
     RESERVED_NAMES = set(_structure).union(_key_structure)
 
 
-    class CreatingError(ModuleBaseException):
-        def __init__(self, *args):
-            super().__init__(*args, error_name = "File creating failed")
-
-
     class FileCorruptedError(ModuleBaseException):
         def __init__(self, *args):
             super().__init__(*args, error_name = "File corrupted")
-
-
-    class SavingError(ModuleBaseException):
-        def __init__(self, *args):
-            super().__init__(*args, error_name = "File not saved")
-
-
-    class LoadingError(ModuleBaseException):
-        def __init__(self, *args):
-            super().__init__(*args, error_name = "File not loaded")
 
 
     class ReservedValueError(ModuleBaseException):
         def __init__(self, *args):
             error_name = "Invalid value error, these values are reserved: " + ", ".join(ContactsFile.RESERVED_NAMES)
             super().__init__(self, *args, error_name = error_name)
+
 
     class Copy:
 
@@ -443,46 +429,49 @@ class ContactsFile:
 
         class EncryptionError(ModuleBaseException):
             def __init__(self, *args):
-                super().__init__(*rgs, error_name = "Encryption error")
+                super().__init__(*args, error_name = "Encryption error")
 
-
-        def decrypt(file_path: Optional[str] = "tgsend.contacts.decrypted",
+        @classmethod
+        def decrypt(cls,
+                    file_path: Optional[str] = "tgsend.contacts.decrypted",
                     file_key: Optional[bytes] = FILE_KEY,
                     force_mode: Optional[bool] = False,
                     )-> NoReturn:
 
             contact_file = ContactsFile._load(file_key = file_key)
 
-            mode = "w+" if force_mode else "w"
+            mode = "w" if force_mode else "x"
 
             try:
-                with open(file_path, "w") as copy:
+                with open(file_path, mode = mode) as copy:
                     json.dump(contact_file, copy)
 
             except FileExistsError as e:
                  error_message = f"File '{file_path}' already exists. Use force mode to overwrite."
-                 raise DecryptionError(e, error_message = error_message)
+                 raise cls.DecryptionError(e, error_message = error_message) from e
 
-            except (FileNotFoundError, IOError) as e:
-                raise DecryptionError(e) from e
+            except IOError as e:
+                raise cls.DecryptionError(e) from e
 
             finally:
-                logger.info("File decrypted")
+                logging.info("File decrypted")
 
-        def encrypt(file_path: str,
+        @classmethod
+        def encrypt(cls,
+                    file_path: str,
                     file_key: Optional[bytes] = FILE_KEY
                     ) -> NoReturn:
 
             try:
                 with open(file_path, "r") as copy:
                     contact_file = json.load(copy)
-                ContactsFile._save(contact_file, file_key=file_key)
+                ContactsFile._save(contact_file, file_key = file_key)
 
             except (FileNotFoundError, IOError, json.JSONDecodeError) as e:
-                raise EncryptionError(e) from e
+                raise cls.EncryptionError(e) from e
 
             finally:
-                logger.info("File encrypted")
+                logging.info("File encrypted")
 
     class Edit:
 
@@ -543,8 +532,12 @@ class ContactsFile:
 
             api_is_none = ", the key value is empty" if api_key is None else ""
             is_default = ", the key set as default" if set_default else ""
-            logger.info(f"api-key '{api_key_name}' saved" + api_is_none + is_default)
+            logging.info(f"api-key '{api_key_name}' saved" + api_is_none + is_default)
 
+
+    class CreatingError(ModuleBaseException):
+        def __init__(self, *args):
+            super().__init__(*args, error_name = "File creating failed")
 
     @classmethod
     def create(cls,
@@ -597,6 +590,10 @@ class ContactsFile:
             raise CreatingError("Operation aborted by user")
 
 
+    class LoadingError(ModuleBaseException):
+        def __init__(self, *args):
+            super().__init__(*args, error_name = "File not loaded")
+
     @classmethod
     def _load(cls, file_key = FILE_KEY) -> Dict:
 
@@ -615,7 +612,7 @@ class ContactsFile:
                 error = f"file {cls._name} corrupted"
                 raise FileCorruptedError(error)
 
-            decrypted_data = bytearray(byte ^ key for byte in encrypted_data)
+            decrypted_data = bytearray(byte ^ file_key for byte in encrypted_data)
 
             contacts_dict = json.loads(decrypted_data.decode())
 
@@ -624,14 +621,20 @@ class ContactsFile:
         except (cls.FileCorruptedError, FileNotFoundError, json.JSONDecodeError) as e:
             raise LoadError(e)
 
+
+    class SavingError(ModuleBaseException):
+        def __init__(self, *args):
+            super().__init__(*args, error_name = "File not saved")
+
     @classmethod
     def _save(cls,
               new_file: dict,
-              key: bytes = FILE_KEY) -> NoReturn:
+              file_key: bytes = FILE_KEY
+              ) -> NoReturn:
 
         json_data = json.dumps(new_file)
 
-        encrypted_data = bytearray(byte ^ key for byte in json_data.encode())
+        encrypted_data = bytearray(byte ^ file_key for byte in json_data.encode())
 
         new_hash = hashlib.sha256(encrypted_data).hexdigest().encode()
 
@@ -756,9 +759,8 @@ class ContactsFile:
         return SendingConfigs(api_key = api_key, api_key_name = api_key_name, recipients = recipients)
 
 
+class GetContacts:
 
-
-class GetContacts(ContactsFile):
 
     class Message(NamedTuple):
         chat_id: int
@@ -767,51 +769,49 @@ class GetContacts(ContactsFile):
         text: str
 
 
-    @classmethod
-    def from_updates(cls,
-                     api_key_name: str,
+    class GetContactsError(ModuleBaseException):
+        def __init__(self, *args):
+            super().__init__(*args)
+
+
+    def from_updates(api_key_name: str,
                      api_key: str = None,
                      filter_username: str = None,
                      filter_text: str = None) -> NoReturn:
 
-        contacts_dict = super()._load()
+        contacts_dict = ContactsFile._load()
 
         if api_key_name not in contacts_dict:
             error = f"api-key '{api_key_name}' is not exists in contacts file"
-            raise ValueError(error)
+            raise GetContacts.GetContactsError(error_message = error)
 
         if api_key is not None:
             api_key = contacts_dict[api_key_name]["api_key"]
-            logger.info("api key taken from contacs file")
+            logging.info("Api key taken from contacs file")
 
         Utilities.check_api_key(api_key)
 
 
     def _get_updates(api_key: str) -> List:
 
+        logging.info("Getting updates from Telagram server")
+
         url = f'https://api.telegram.org/bot{api_key}/getUpdates'
 
-        logger.info("Getting updates from Telagram server")
+        with urllib.request.urlopen(url) as response_raw:
+            response = json.loads(response_raw.read())
 
-        try:
+        if not response.get("ok"):
+            error = "Wrong API-call"
+            raise  (error)
 
-            with urllib.request.urlopen(url) as response_raw:
-                response = json.loads(response_raw.read())
+        elif response["result"] == []:
+            error = "no updates, send some message to bot, and try again"
+            raise GetContacts.GetContactsError(error)
 
-            if not response.get("ok"):
-                error = "Wrong API-call"
-                raise ValueError(error)
+        logging.info("Returing data from Telegram server")
 
-            elif response["result"] == []:
-                error = "no updates, send some message to bot, and try again"
-                raise ValueError(error)
-
-            logger.info("returing data from Telegram server")
-            return response["result"]
-
-        except Exception as e:
-          error = "error retrieving data from Telegram server: " + e.args[0]
-          raise Exception(error)
+        return response["result"]
 
 
     def _format_messages(messages: list[Message]) -> list[Message]:
@@ -819,7 +819,7 @@ class GetContacts(ContactsFile):
         '''
         get "result" friom Telagram, extact values and form Message class from each message
         '''
-        logger.info("messages formating starts")
+        logging.info("Messages formating starts")
 
         formated_messages_dict = {}
 
@@ -841,9 +841,9 @@ class GetContacts(ContactsFile):
             formated_messages_dict[chat_id] = Message(chat_id = chat_id, username = username,
                                                       first_name = first_name, text = text)
 
-        formated_messages = formated_messages_dict.values()
+        formated_messages = [formated_messages_dict.values()]
 
-        logger.info(f"returning {len(formated_messages)} messages")
+        logging.info(f"returning {len(formated_messages)} messages")
         return formated_messages
 
 
@@ -859,35 +859,35 @@ class GetContacts(ContactsFile):
         2) from username
         3) contains right message
         '''
-        logger.info(f"Start filtering messages, filter by username: {filter_username}, filter by text: {filter_text}")
+        logging.info(f"Start filtering messages, filter by username: {filter_username}, filter by text: {filter_text}")
 
         filtered_messages = []
 
         for message in messages:
 
             if message.chat_id in existing_chat_id:
-                logger.info(f"{message.chat_id} already in contacts file")
+                logging.info(f"{message.chat_id} already in contacts file")
                 continue
 
             elif filter_text != None and message.text != filter_text:
-                logger.info(f"{message.text} from {message.username}({message.chat_id}) not matches to {filter_text}")
+                logging.info(f"{message.text} from {message.username}({message.chat_id}) not matches to {filter_text}")
                 continue
 
             elif filter_username != None and message.username not in (filter_username, "NOUSERNAME"):
-                logger.info(f"{message.username}({message.chat_id}) not matches to {filter_username}")
+                logging.info(f"{message.username}({message.chat_id}) not matches to {filter_username}")
                 continue
 
             else:
                 filtered_messages.append(message)
 
-        logger.info(f"returning {len(filtered_messages)} filtered messages")
+        logging.info(f"returning {len(filtered_messages)} filtered messages")
 
         return filtered_messages
 
 
     def _check_messages(messages: list[Message], existing_contacts: Dict[str, int]) -> NoReturn:
 
-        logger.info("starting checking of messages")
+        logging.info("starting checking of messages")
 
         existing_contacts = existing_contacts.copy()
 
@@ -1164,6 +1164,9 @@ class Handler:
     Also it will be better for logging, couse Dispatcher.send returns dictionaries of
     sending good and bad messages or/and files (and control sum of packages for sure).
    '''
+    class HandlerError(ModuleBaseException):
+        def __init__(self, *args):
+            super.__init__(*args, error_name = "Wrong arguments")
 
     @classmethod
     def dispatcher_wrapper(cls,
@@ -1171,6 +1174,7 @@ class Handler:
                            api_key_name: str = None,
                            chat_id: int = None,
                            chat_name: str = None,
+                           no_color: bool = False,
                            print_success: bool = True,
                            messages: list[str] = [],
                            documents: list[str] = [],
@@ -1182,15 +1186,15 @@ class Handler:
             # this shit will raise an error when will provided no arguments or both
             if (api_key and api_key_name) or (not api_key and not api_key_name):
                 error = "saved API-key name (using -A flag for non-defualt values) OR manually provided API-key (using -M flag) required"
-                raise ValueError(error)
+                raise cls.HandlerError(error)
 
             elif (chat_id and chat_name) or (not chat_id and not chat_name):
                 error = "chat id name (from contacts file, using -t flag for non-default values) OR manually provided (using -T flag) required"
-                raise ValueError(error)
+                raise cls.HandlerError(error)
 
             elif not any((messages, documents, audiofiles)):
                 error = "nothing to send"
-                raise ValueError(error)
+                raise cls.HandlerError(error)
 
             # get values according providen names
             extracted_values = ContactsFile.get_values(api_key_name = api_key_name, chat_name = chat_name)
@@ -1207,15 +1211,17 @@ class Handler:
             exit_status = cls._status_printer(status_dictionaries,
                                               print_success = print_success)
 
-        except (Exception, BaseException) as e:
+        except ModuleBaseException as e:
 
-            exit_status = 2
-            if isinstance(e, (SystemExit, KeyboardInterrupt)):
-                raise
+            exit_status = 1
+
+            if no_color:
+                print(e)
+                logging.info(e.log)
 
             else:
-               error = Colorize(text = e.args[0], color = "red")
-               print(error)
+               error = Colorize(text = e.name, color = "red")
+               print(error + ": " + e.message)
 
                # traceback.print_exc()
 
