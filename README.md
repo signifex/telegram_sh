@@ -1,4 +1,4 @@
-# telegram_sh
+# telegram_sh (old version, see `dev` branch instead)
 
 This is deep re-writed version of old script:
 
