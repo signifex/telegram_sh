@@ -4,9 +4,16 @@
 # python cache
 __pycache__/
 
+# Pip
+Pip*
+
 # my junk files
 out*
 draft*
+some*
+
+# default name for decrypted contacts file
+tgsend.contacts.decrypted
 
 # folder with testing files
 examples/
