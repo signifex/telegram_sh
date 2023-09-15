@@ -24,11 +24,17 @@ This is the third version of the script, for next one:
 4) aiohttp supporting
 '''
 
+
 # ------------------------------------------------ imports ------------------------------------------------- #
 
 import argparse
 import sys
 from typing import List, Literal, Union, Optional, NoReturn
+
+from . import logger
+from .utilities import ModuleBaseException
+from .dispatcher import Dispatcher
+from .contacts import ContactsCreate, ContactsAdd, ContactsEdit
 
 try:
     from decorations import Colorize
@@ -36,16 +42,13 @@ try:
 except ImportError:
     COLORIZE = False
 
-from . import logger
-from .utilities import ModuleBaseException
-from .dispatcher import Dispatcher
-from .contacts import ContactsFile
 
 # ----------------------------------------------- constants ------------------------------------------------ #
 
 EXIT_STATUS = Literal[0, 1]
 
 # ------------------------------------------------ classes ------------------------------------------------- #
+
 
 class Handler:
 
@@ -63,7 +66,7 @@ class Handler:
 
     class HandlerError(ModuleBaseException):
         def __init__(self, *args):
-            super.__init__(*args, error_name = "Wrong arguments")
+            super.__init__(*args, error_title = "Wrong arguments")
 
 
     @classmethod

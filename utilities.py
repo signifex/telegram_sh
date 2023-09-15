@@ -3,7 +3,7 @@ import datetime
 import urllib.request
 
 from io import BytesIO
-from typing import List, BinaryIO, Optional, NoReturn
+from typing import Dict, List, Tuple, BinaryIO, Optional, Iterable, NoReturn
 
 from . import logger
 
@@ -38,7 +38,7 @@ class ModuleBaseException(Exception):
             ...
             class CustomError(ModuleBaseException):
                 def __init__(*args)
-                    super().__init__(args, error_name = "more functional name")
+                    super().__init__(args, error_title = "more functional name")
             ...
 
             try:
@@ -62,7 +62,7 @@ class ModuleBaseException(Exception):
 
     def __init__(self,
                  original_exception: Optional[Exception] = None,
-                 error_name: Optional[str] = None,
+                 error_title: Optional[str] = None,
                  error_message: Optional[str] = None):
 
         if self.__class__ == ModuleBaseException:
@@ -70,7 +70,7 @@ class ModuleBaseException(Exception):
 
         self.original_exception = original_exception if original_exception else self
 
-        self.name = error_name if error_name else self.__class__.__name__
+        self.title = error_title if error_title else self.__class__.__name__
 
         self.message = str(self.original_exception) if original_exception else error_message
 
@@ -84,7 +84,16 @@ class ModuleBaseException(Exception):
         super().__init__(self.message)
 
     def __str__(self):
-        return f"{self.name}: {self.message}"
+        return f"{self.title}: {self.message}"
+
+
+class SimpeInterface:
+
+    def confirmation_loop():
+        pass
+
+    def check_contacts():
+        pass
 
 
 class Checkers:
@@ -188,6 +197,82 @@ class Checkers:
         if fucked_up_packages:
             error_message = "\n\t" + "\n\t".join([f"{key}: {value}" for key, value in fucked_up_packages.items()])
             raise Utilities.Checkers.CheckFailed(error_message)
+
+
+class SendingConfigs:
+
+    '''
+    Sender-recipients configs, that class Dispatcher takes.
+    API-key: Telegram bot's key.
+    If value not saved in contacts file, can be set using classmethod manual_api_key(api_key)
+
+    Name of API-key (optional), for logging.
+
+    Recipients (Itarable object) of integers (chat id).
+    If a dictionary is provided in format (int: str), the keys will be used as names for logging.
+    In other cases names will have "None" values
+
+    Only obj.api_key_name can be changed.
+    '''
+
+    class CreatingError(ModuleBaseException):
+        def __init__(self, *args):
+            super().__init__(*args, error_name = "Configurations for sending are not set")
+
+
+    def __init__(self,
+                 api_key: str,
+                 recipients: Iterable[int],
+                 api_key_name: Optional[str] = None):
+
+        self._api_key = api_key
+        self.api_key_name = api_key_name
+        self._recipients = recipients.copy() if isinstance(recipients, dict) else dict.fromkeys(recipients)
+
+        logging.info(f"Data for sending messages is formed, amount of recipients: {len(self._recipients)}")
+
+
+    def _get_api_key(self) -> Tuple[str, str]:
+        return self._api_key, self.api_key_name
+
+    api_key = property(_get_api_key)
+
+
+    def _get_recipients(self) -> Dict:
+        return self._recipients
+
+    recipients = property(_get_recipients)
+
+
+    def manual_api_key(self, new_api_key: str):
+        '''
+        Provide API-key value manually.
+        Will raise an error, if value of API-key is already set.
+        '''
+        if api_key:
+            error = f"Replacing an existing api-key is not possible"
+            raise AttributeError(error)
+
+        else:
+            self._api_key = new_api_key
+
+        logging.info("Using manual provided api-key")
+        return self
+
+
+    def add_recipients(self,
+                       recipients: Iterable[str],
+                       overwrite_names: bool = False):
+
+        if isinstance(recipients, dict) and overwrite_names:
+            self._recipients.update(recipients)
+
+        else:
+            for recipient in recipients:
+                self._recipients.setdefault(recipients)
+
+        logging.info("Recipients list updated")
+        return self
 
 
 def key_timestamp() -> str:

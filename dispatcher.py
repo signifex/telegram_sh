@@ -17,9 +17,9 @@ try:
 except ImportError:
     AIOHTTP = False
 
-from tgsend import logger
-from tgsend.utilities import ModuleBaseException, Checkers, key_timestamp
-from tgsend.contacts import SendingConfigs
+from . import logger
+from .utilities import ModuleBaseException, Checkers, SendingConfigs, key_timestamp
+from .contacts import SendingConfigs
 
 
 class Dispatcher:
