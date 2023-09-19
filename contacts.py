@@ -7,9 +7,9 @@ import pprint
 from typing import List, Dict, Tuple, NamedTuple, Union, Iterable, Optional, NoReturn
 
 from . import logger
-from .utilities import ModuleBaseException
+from .utilities import _ModuleBaseException, SendingConfigs, Checkers
 
-class BaseContactsClass:
+class _BaseContactsClass:
 
     _file_structure = {
         "default": None,
@@ -31,91 +31,123 @@ class BaseContactsClass:
     configurations = configparser.ConfigParser()
     configurations.read(_configs_file_path)
 
-    CONTACTS_FILE_KEY = int(configurations["keys"]["contacts_file_key"])
+    _DEFAULT_FILE_KEY = configurations["keys"]["default_file_key"]
 
     _RESERVED_NAMES = set(_file_structure).union(key_structure)
 
 
-    class SavingError(ModuleBaseException):
+    class FileSavingError(_ModuleBaseException):
         def __init__(self, *args):
             super().__init__(*args, error_title = "File not saved")
 
-    class LoadingError(ModuleBaseException):
+    class FileLoadingError(_ModuleBaseException):
         def __init__(self, *args):
             super().__init__(*args, error_title = "File not loaded")
 
-    class FileCreatingError(ModuleBaseException):
-        def __init__(self, *args):
-            super().__init__(*args, error_title = "File creating failed")
-
-    class FileCorruptedError(ModuleBaseException):
+    class FileCorruptedError(_ModuleBaseException):
         def __init__(self, *args):
             super().__init__(*args, error_title = "File corrupted")
 
-    class ReservedValueError(ModuleBaseException):
+    class ReservedValueError(_ModuleBaseException):
         def __init__(self, *args):
             error_title = "Invalid value, these values are reserved: " + ", ".join(_RESERVED_NAMES)
             super().__init__(*args, error_title = error_title)
 
+
     @classmethod
     def _save_file(cls,
                    new_file: dict,
-                   file_key: bytes = CONTACTS_FILE_KEY
-                   ) -> NoReturn:
+                   mode: str = "xb",
+                   *args) -> NoReturn:
 
-        json_data = json.dumps(new_file)
+        logger.debug("Saving function started.")
 
-        encrypted_data = bytearray(byte ^ file_key for byte in json_data.encode())
+        binary_data = json.dumps(new_file).encode()
+        encrypted_data = cls._xor_exchange(binary_data, *args)
 
-        new_hash = hashlib.sha256(encrypted_data).hexdigest().encode()
+        try:
+            with open(cls._contacts_file_path, mode) as file:
+                file.write(encrypted_data)
 
-        export_data = encrypted_data + new_hash
+            logger.debug("Saving function completed successfully.")
 
-        with open(cls._contacts_file_path, "wb") as file:
-            file.write(export_data)
+        except FileExistsError as e:
+            logger.error(f"An error occurred during saving: {e}")
+            raise cls.FileSavingError(e) from e
 
 
     @classmethod
     def _load_file(cls,
-                   file_key: bytes = CONTACTS_FILE_KEY
-                   ) -> Dict:
+                   file_path: Optional[str] = _contacts_file_path,
+                   *args) -> Dict:
+
+        logger.debug(f"Loading of {file_path} started")
 
         try:
 
-            with open(cls._contacts_file_path, mode = "rb") as file:
+            with open(file_path, mode = "rb") as file:
                 binary_data = file.read()
 
-            encrypted_data = binary_data[:-64]
-
-            stored_hash = binary_data[-64:]
-
-            new_hash = hashlib.sha256(encrypted_data).hexdigest().encode()
-
-            if new_hash != stored_hash:
-                error_message = f"File {cls._contacts_file_name} corrupted"
-                raise cls.FileCorruptedError(error_message)
-
-            decrypted_data = bytearray(byte ^ file_key for byte in encrypted_data)
-
+            decrypted_data = cls._xor_exchange(binary_data, *args)
             contacts_dict = json.loads(decrypted_data.decode())
 
+            logger.debug("Loading of {file_path} completed successfully.")
             return contacts_dict
 
-        except (cls.FileCorruptedError, FileNotFoundError, json.JSONDecodeError) as e:
-            raise cls.LoadingError(e)
+        except (FileNotFoundError, json.JSONDecodeError) as e:
+            logger.error(f"An error occurred during loading: {e}")
+            raise cls.FileLoadingError(e)
 
 
     @classmethod
-    def create_file(cls,
-                    api_key_name: str,
-                    api_key_value: Optional[str] = None,
-                    file_key: Optional[bytes] = CONTACTS_FILE_KEY,
-                    set_default: Optional[bool] = True,
-                    force_mode: Optional[bool] = False,
-                    autoconfirm: Optional[bool] = False
-                    ) -> NoReturn:
+    def _xor_exchange(cls,
+                      input_data: bytearray,
+                      file_key: str = _DEFAULT_FILE_KEY
+                      ) -> bytearray:
+
+        logger.info(f"Byte excahnge started")
+
+        byte_key = hashlib.sha256(file_key.encode()).digest()
+        exchanged_data = b""
+
+        for i, byte in enumerate(input_data):
+            exchanged_data += bytes([byte ^ byte_key[i % len(byte_key)]])
+
+        return exchanged_data
+
+
+    @classmethod
+    def _check_reserved_values(cls, *args: List[str]):
+        errors = [arg for arg in args if arg in cls._RESERVED_NAMES]
+        if errors:
+            error_message = "provided invalid values: " + ", ".join(*errors)
+            raise ReservedValueError(error_message)
+
+
+class ContactsCreate(_BaseContactsClass):
+
+    class FileCreatingError(_ModuleBaseException):
+        def __init__(self, *args):
+            super().__init__(*args, error_title = "File creating failed")
+
+    @classmethod
+    def __call__(cls,
+                 api_key_name: str,
+                 api_key_value: Optional[str] = None,
+                 file_key: Optional[str] = None,
+                 set_default: Optional[bool] = True,
+                 force_mode: Optional[bool] = False,
+                 autoconfirm: Optional[bool] = False
+                 ) -> NoReturn:
+
 
         cls._check_reserved_values([api_key_name])
+
+        if manual_api_key is None:
+            api_key_value = cls._DEFAULT_FILE_KEY
+            logger.info("Api key taken from contacs file")
+        else:
+            api_key_value = manual_api_key
 
         if not api_key_value and not force_mode:
             error_message = "Empty api-key value. Use force-mode to save leer value, or provide valid API-key"
@@ -155,15 +187,9 @@ class BaseContactsClass:
         except KeyboardInterrupt:
             raise FileCreatingError("Operation aborted by user")
 
-    @classmethod
-    def _check_reserved_values(cls, *args: List[str]):
-        errors = [arg for arg in args if arg in cls._RESERVED_NAMES]
-        if errors:
-            error_message = "provided invalid values: " + ", ".join(*errors)
-            raise cls.ReservedValueError(error_message)
 
+class ContactsGet(_BaseContactsClass):
 
-class ContactsGet(BaseContactsClass):
 
     class Message(NamedTuple):
         chat_id: int
@@ -171,7 +197,8 @@ class ContactsGet(BaseContactsClass):
         first_name: str
         text: str
 
-    class GetContactsError(ModuleBaseException):
+
+    class GetContactsError(_ModuleBaseException):
         def __init__(self, *args):
             super().__init__(*args)
 
@@ -189,17 +216,17 @@ class ContactsGet(BaseContactsClass):
             raise GetContacts.GetContactsError(error_message = error)
 
         if manual_api_key is not None:
-            api_key = super().CONTACTS_FILE_KEY
-            logging.info("Api key taken from contacs file")
+            api_key = _DEFAULT_FILE_KEY
+            logger.info("Api key taken from contacs file")
         else:
             api_key = manual_api_key
 
-        Utilities.Checkers.check_api_key(api_key)
+        Chechers.check_api_key(api_key)
 
 
     def _get_updates(api_key: str) -> List:
 
-        logging.info("Getting updates from Telagram server")
+        logger.info("Getting updates from Telagram server")
 
         url = f'https://api.telegram.org/bot{api_key}/getUpdates'
 
@@ -214,7 +241,7 @@ class ContactsGet(BaseContactsClass):
             error = "no updates, send some message to bot, and try again"
             raise GetContacts.GetContactsError(error)
 
-        logging.info("Returing data from Telegram server")
+        logger.info("Returing data from Telegram server")
 
         return response["result"]
 
@@ -224,7 +251,7 @@ class ContactsGet(BaseContactsClass):
         '''
         get "result" friom Telagram, extact values and form Message class from each message
         '''
-        logging.info("Messages formating starts")
+        logger.info("Messages formating starts")
 
         formated_messages_dict = {}
 
@@ -248,7 +275,7 @@ class ContactsGet(BaseContactsClass):
 
         formated_messages = [formated_messages_dict.values()]
 
-        logging.info(f"returning {len(formated_messages)} messages")
+        logger.info(f"returning {len(formated_messages)} messages")
         return formated_messages
 
 
@@ -264,35 +291,35 @@ class ContactsGet(BaseContactsClass):
         2) from username
         3) contains right message
         '''
-        logging.info(f"Start filtering messages, filter by username: {filter_username}, filter by text: {filter_text}")
+        logger.info(f"Start filtering messages, filter by username: {filter_username}, filter by text: {filter_text}")
 
         filtered_messages = []
 
         for message in messages:
 
             if message.chat_id in existing_chat_id:
-                logging.info(f"{message.chat_id} already in contacts file")
+                logger.info(f"{message.chat_id} already in contacts file")
                 continue
 
             elif filter_text != None and message.text != filter_text:
-                logging.info(f"{message.text} from {message.username}({message.chat_id}) not matches to {filter_text}")
+                logger.info(f"{message.text} from {message.username}({message.chat_id}) not matches to {filter_text}")
                 continue
 
             elif filter_username != None and message.username not in (filter_username, "NOUSERNAME"):
-                logging.info(f"{message.username}({message.chat_id}) not matches to {filter_username}")
+                logger.info(f"{message.username}({message.chat_id}) not matches to {filter_username}")
                 continue
 
             else:
                 filtered_messages.append(message)
 
-        logging.info(f"returning {len(filtered_messages)} filtered messages")
+        logger.info(f"returning {len(filtered_messages)} filtered messages")
 
         return filtered_messages
 
 
     def _check_messages(messages: list[Message], existing_contacts: Dict[str, int]) -> NoReturn:
 
-        logging.info("starting checking of messages")
+        logger.info("starting checking of messages")
 
         existing_contacts = existing_contacts.copy()
 
@@ -376,24 +403,23 @@ class ContactsGet(BaseContactsClass):
 
 
 
-class ContactsCopy:
+class ContactsCopy(_BaseContactsClass):
 
-    class DecryptionError(ModuleBaseException):
+    class DecryptionError(_ModuleBaseException):
         def __init__(self, *args):
-            super().__init__(*args, error_name = "Decryption error")
+            super().__init__(error_title = "Decryption error", *args)
 
-    class EncryptionError(ModuleBaseException):
+    class EncryptionError(_ModuleBaseException):
         def __init__(self, *args):
-            super().__init__(*args, error_name = "Encryption error")
+            super().__init__(error_title = "Encryption error", *args)
 
     @classmethod
     def decrypt(cls,
                 file_path: Optional[str] = "tgsend.contacts.decrypted",
-                file_key: Optional[bytes] = None,
                 force_mode: Optional[bool] = False,
-                )-> NoReturn:
+                *args)-> NoReturn:
 
-        contact_file = ContactsFile._load_file(file_key = file_key)
+        contact_file = cls._load_file()
 
         mode = "w" if force_mode else "x"
 
@@ -412,34 +438,34 @@ class ContactsCopy:
     @classmethod
     def encrypt(cls,
                 file_path: str,
-                file_key: Optional[bytes] = super().CONTACTS_FILE_KEY
-                ) -> NoReturn:
+                force_mode: Optional[bool] = False,
+                *args) -> NoReturn:
 
         try:
             with open(file_path, "r") as copy:
                 contact_file = json.load(copy)
-            ContactsFile._save_file(contact_file, file_key = file_key)
+            cls._save_file(contact_file, *args)
+            logger.info("File encrypted")
 
         except (FileNotFoundError, IOError, json.JSONDecodeError) as e:
             raise cls.EncryptionError(e) from e
 
-        finally:
-            logging.info("File encrypted")
 
 
-class ContactsEdit(BaseContactsClass):
+class ContactsEdit(_BaseContactsClass):
 
     '''
     Edit contacts file
 
     '''
 
-    class EditingError(ModuleBaseException):
+    class EditingError(_ModuleBaseException):
         def __init__(self, original_exception):
             super().__init__(original_exception, "File editing error")
 
-
-    def add_api_key(api_key_name: str,
+    @classmethod
+    def add_api_key(cls,
+                    api_key_name: str,
                     api_key_value: Optional[str] = None,
                     file_key: Optional[bytes] = None,
                     set_default: Optional[bool] = False,
@@ -447,13 +473,10 @@ class ContactsEdit(BaseContactsClass):
                     autoconfirm: Optional[bool] = False,
                     ) -> NoReturn:
 
-        contacts_dict = super()._load_file()
+        contacts_dict = cls._load_file()
 
-        if manual_api_key = None:
-            manual_api_key = super().CONTACTS_FILE_KEY
-
-        if api_key_name in super()._RESERVED_NAMES:
-            raise EditingError(super().ReservedValueError)
+        if api_key_name in _RESERVED_NAMES:
+            raise EditingError(cls.ReservedValueError)
 
         if not force_mode:
 
@@ -465,7 +488,7 @@ class ContactsEdit(BaseContactsClass):
                 error = "API-key is not provided, use force mode to save key without value"
                 raise cls.EditingError(error)
 
-            Utilities.Checkers.check_api_key(api_key = api_key)
+            Checkers.check_api_key(api_key = api_key)
 
         if api_key is None and not autoconfirm:
 
@@ -479,7 +502,7 @@ class ContactsEdit(BaseContactsClass):
                 elif action.lower() == "y":
                     break
 
-        contacts_dict[api_key_name] = super().key_structure
+        contacts_dict[api_key_name] = cls.key_structure
         contacts_dict[api_key_name]["api_key"] = api_key
 
         if set_default:
@@ -489,11 +512,12 @@ class ContactsEdit(BaseContactsClass):
 
         api_is_none = ", the key value is empty" if api_key is None else ""
         is_default = ", the key set as default" if set_default else ""
-        logging.info(f"api-key '{api_key_name}' saved" + api_is_none + is_default)
+        logger.info(f"api-key '{api_key_name}' saved" + api_is_none + is_default)
 
 
-class ContactsShow(BaseContactsClass):
+class ContactsShow(_BaseContactsClass):
 
+    @classmethod
     def __call__(cls,
                  api_key_name: str) -> NoReturn:
 
@@ -514,7 +538,7 @@ class ContactsShow(BaseContactsClass):
             print(*contacts)
 
 
-class CreateSendingConfigs(BaseContactsClass):
+class CreateSendingConfigs(_BaseContactsClass):
 
     '''
     read contacts file for chat id accoring gived names and return a SendingCofigs object.
@@ -528,7 +552,7 @@ class CreateSendingConfigs(BaseContactsClass):
                  manual_id: Union[int, Iterable[int]] = None,
                  ) -> SendingConfigs:
 
-        contacts_dict = super()._load_file()
+        contacts_dict = cls._load_file()
 
         if api_key_name not in contacts_dict.keys():
             error = "name of api-key not found in  contacts file"

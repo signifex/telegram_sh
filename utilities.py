@@ -7,13 +7,13 @@ from typing import Dict, List, Tuple, BinaryIO, Optional, Iterable, NoReturn
 
 from . import logger
 
-class ModuleBaseException(Exception):
+class _ModuleBaseException(Exception):
 
     """
     Base exception class to provide a consistent format for custom exceptions.
     This class is designed to be subclassed and should not be raised directly.
 
-    ModuleBaseException is the foundational exception class for custom exceptions in this module.
+    _ModuleBaseException is the foundational exception class for custom exceptions in this module.
 
     It's designed to capture and store detailed information about exceptions,
     making it easier to handle, log, and report errors. Child exceptions derived
@@ -36,7 +36,7 @@ class ModuleBaseException(Exception):
 
         Example:
             ...
-            class CustomError(ModuleBaseException):
+            class CustomError(_ModuleBaseException):
                 def __init__(*args)
                     super().__init__(args, error_title = "more functional name")
             ...
@@ -49,14 +49,14 @@ class ModuleBaseException(Exception):
 
             try:
                (call function with last try-catch block)
-            except ModuleBaseException as e:
+            except _ModuleBaseException as e:
                 print(e)
                 print(e.log)
                 logging.error(e.traceback)
             ...
 
     Note:
-        Catching `ModuleBaseException` in error handlers will also catch all
+        Catching `_ModuleBaseException` in error handlers will also catch all
         its child exceptions.
     """
 
@@ -65,8 +65,8 @@ class ModuleBaseException(Exception):
                  error_title: Optional[str] = None,
                  error_message: Optional[str] = None):
 
-        if self.__class__ == ModuleBaseException:
-            raise NotImplementedError("ModuleBaseException should not be raised directly. Use a subclass instead.")
+        if self.__class__ == _ModuleBaseException:
+            raise NotImplementedError("_ModuleBaseException should not be raised directly. Use a subclass instead.")
 
         self.original_exception = original_exception if original_exception else self
 
@@ -79,7 +79,7 @@ class ModuleBaseException(Exception):
         else:
             self.traceback = traceback.format_stack()[:-2]
 
-        self.log = "\n".join(("\n" + Utilities.normal_timestamp(), self.__str__(), ''.join(self.traceback)))
+        self.log = "\n".join(("\n" + normal_timestamp(), self.__str__(), ''.join(self.traceback)))
 
         super().__init__(self.message)
 
@@ -100,7 +100,7 @@ class Checkers:
 
     _MAX_SIZE = 50 * 1024 * 1024
 
-    class CheckFailed(ModuleBaseException):
+    class CheckFailed(_ModuleBaseException):
         def __init__(self, *args):
             super().__init__(*args, error_name = "Check failed")
 
@@ -215,7 +215,7 @@ class SendingConfigs:
     Only obj.api_key_name can be changed.
     '''
 
-    class CreatingError(ModuleBaseException):
+    class CreatingError(_ModuleBaseException):
         def __init__(self, *args):
             super().__init__(*args, error_name = "Configurations for sending are not set")
 

@@ -32,9 +32,9 @@ import sys
 from typing import List, Literal, Union, Optional, NoReturn
 
 from . import logger
-from .utilities import ModuleBaseException
+from .utilities import _ModuleBaseException
 from .dispatcher import Dispatcher
-from .contacts import ContactsCreate, ContactsAdd, ContactsEdit
+from .contacts import ContactsCreate, ContactsEdit, ContactsCopy, ContactsGet
 
 try:
     from decorations import Colorize
@@ -64,7 +64,7 @@ class Handler:
     sending good and bad messages or/and files (and control sum of packages for sure).
     '''
 
-    class HandlerError(ModuleBaseException):
+    class HandlerError(_ModuleBaseException):
         def __init__(self, *args):
             super.__init__(*args, error_title = "Wrong arguments")
 
@@ -111,7 +111,7 @@ class Handler:
             exit_status = cls._status_printer(status_dictionaries,
                                               print_success = print_success)
 
-        except ModuleBaseException as e:
+        except _ModuleBaseException as e:
 
             exit_status = 1
 

@@ -7,8 +7,4 @@ logger = logging.getLogger(__name__)
 
 from .main import Handler
 from .dispatcher import Dispatcher
-from .contacts import (ContactsFile,
-                       ContactsCopy,
-                       ContactsGet,
-                       ContactsEdit)
-
+from .contacts import ContactsCreate, ContactsEdit, ContactsCopy, ContactsGet
