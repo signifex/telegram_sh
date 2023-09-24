@@ -18,7 +18,7 @@ except ImportError:
     AIOHTTP = False
 
 from . import logger
-from .utilities import _ModuleBaseException, Checkers, SendingConfigs, key_timestamp
+from .utilities import ModuleBaseException, Checkers, SendingConfigs, key_timestamp
 from .contacts import SendingConfigs
 
 
@@ -61,7 +61,7 @@ class Dispatcher:
         fail: Dict[str, str]
 
 
-    class DispatcherError(_ModuleBaseException):
+    class DispatcherError(ModuleBaseException):
         pass
 
 

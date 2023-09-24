@@ -7,13 +7,13 @@ from typing import Dict, List, Tuple, BinaryIO, Optional, Iterable, NoReturn
 
 from . import logger
 
-class _ModuleBaseException(Exception):
+class ModuleBaseException(Exception):
 
     """
     Base exception class to provide a consistent format for custom exceptions.
     This class is designed to be subclassed and should not be raised directly.
 
-    _ModuleBaseException is the foundational exception class for custom exceptions in this module.
+    ModuleBaseException is the foundational exception class for custom exceptions in this module.
 
     It's designed to capture and store detailed information about exceptions,
     making it easier to handle, log, and report errors. Child exceptions derived
@@ -36,7 +36,7 @@ class _ModuleBaseException(Exception):
 
         Example:
             ...
-            class CustomError(_ModuleBaseException):
+            class CustomError(ModuleBaseException):
                 def __init__(*args)
                     super().__init__(args, error_title = "more functional name")
             ...
@@ -49,14 +49,14 @@ class _ModuleBaseException(Exception):
 
             try:
                (call function with last try-catch block)
-            except _ModuleBaseException as e:
+            except ModuleBaseException as e:
                 print(e)
                 print(e.log)
-                logging.error(e.traceback)
+                logger.error(e.traceback)
             ...
 
     Note:
-        Catching `_ModuleBaseException` in error handlers will also catch all
+        Catching `ModuleBaseException` in error handlers will also catch all
         its child exceptions.
     """
 
@@ -65,8 +65,8 @@ class _ModuleBaseException(Exception):
                  error_title: Optional[str] = None,
                  error_message: Optional[str] = None):
 
-        if self.__class__ == _ModuleBaseException:
-            raise NotImplementedError("_ModuleBaseException should not be raised directly. Use a subclass instead.")
+        if self.__class__ == ModuleBaseException:
+            raise NotImplementedError("ModuleBaseException should not be raised directly. Use a subclass instead.")
 
         self.original_exception = original_exception if original_exception else self
 
@@ -80,6 +80,8 @@ class _ModuleBaseException(Exception):
             self.traceback = traceback.format_stack()[:-2]
 
         self.log = "\n".join(("\n" + normal_timestamp(), self.__str__(), ''.join(self.traceback)))
+
+        logger.error(self.log)
 
         super().__init__(self.message)
 
@@ -100,12 +102,12 @@ class Checkers:
 
     _MAX_SIZE = 50 * 1024 * 1024
 
-    class CheckFailed(_ModuleBaseException):
+    class CheckFailed(ModuleBaseException):
         def __init__(self, *args):
             super().__init__(*args, error_name = "Check failed")
 
-
-    def check_api_key(api_key: str) -> NoReturn:
+    @classmethod
+    def check_api_key(cls, api_key: str) -> NoReturn:
         url = f"https://api.telegram.org/bot{api_key}/getMe"
 
         try:
@@ -113,13 +115,13 @@ class Checkers:
             data = json.load(response)
 
             if not data["ok"]:
-                raise ChechFailed("API-key's check failed")
+                raise cls.CheckFailed("API-key's check failed")
 
         except (urllib.error.URLError, urllib.error.HTTPError) as e:
             raise Utilities.Checkers.CheckFailed(e) from e
 
         finally:
-            logging.info("API-key's check passed")
+            logger.info("API-key's check passed")
 
 
     @classmethod
@@ -215,27 +217,27 @@ class SendingConfigs:
     Only obj.api_key_name can be changed.
     '''
 
-    class CreatingError(_ModuleBaseException):
+    class CreatingError(ModuleBaseException):
         def __init__(self, *args):
             super().__init__(*args, error_name = "Configurations for sending are not set")
 
 
     def __init__(self,
-                 api_key: str,
+                 api_key_value: str,
                  recipients: Iterable[int],
                  api_key_name: Optional[str] = None):
 
-        self._api_key = api_key
+        self._api_key_value = api_key_value
         self.api_key_name = api_key_name
         self._recipients = recipients.copy() if isinstance(recipients, dict) else dict.fromkeys(recipients)
 
-        logging.info(f"Data for sending messages is formed, amount of recipients: {len(self._recipients)}")
+        logger.info(f"Data for sending messages is formed, amount of recipients: {len(self._recipients)}")
 
 
     def _get_api_key(self) -> Tuple[str, str]:
-        return self._api_key, self.api_key_name
+        return self._api_key_value, self.api_key_name
 
-    api_key = property(_get_api_key)
+    api_key_value = property(_get_api_key)
 
 
     def _get_recipients(self) -> Dict:
@@ -249,14 +251,14 @@ class SendingConfigs:
         Provide API-key value manually.
         Will raise an error, if value of API-key is already set.
         '''
-        if api_key:
+        if api_key_value:
             error = f"Replacing an existing api-key is not possible"
             raise AttributeError(error)
 
         else:
-            self._api_key = new_api_key
+            self._api_key_value = new_api_key
 
-        logging.info("Using manual provided api-key")
+        logger.info("Using manual provided api-key")
         return self
 
 
@@ -271,7 +273,7 @@ class SendingConfigs:
             for recipient in recipients:
                 self._recipients.setdefault(recipients)
 
-        logging.info("Recipients list updated")
+        logger.info("Recipients list updated")
         return self
 
 
