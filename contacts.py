@@ -7,7 +7,10 @@ import pprint
 from typing import List, Dict, Tuple, NamedTuple, Literal, Union, Iterable, Optional, NoReturn
 
 from . import logger
-from .utilities import ModuleBaseException, SendingConfigs, Checkers
+from .utilities import _ModuleBaseException, _CallableClassMeta
+from .dispatcher import Dispatcher
+
+
 
 class _BaseContactsClass:
 
@@ -15,7 +18,7 @@ class _BaseContactsClass:
         "default": None,
     }
 
-    key_structure = {
+    _key_structure = {
         "api_key": None,
         "contacts": {},
         "bulk_groups": {},
@@ -33,22 +36,21 @@ class _BaseContactsClass:
 
     _DEFAULT_FILE_KEY = configurations["keys"]["default_file_key"]
 
-    _RESERVED_NAMES = set(_file_structure).union(key_structure)
-    _PLATFORMS = ["telegram"]
+    _RESERVED_NAMES = set(_file_structure).union(_key_structure)
 
-    class FileSavingError(ModuleBaseException):
+    class FileSavingError(_ModuleBaseException):
         def __init__(self, *args, **kwargs):
             super().__init__(error_title = "File not saved", *args, **kwargs)
 
-    class FileLoadingError(ModuleBaseException):
+    class FileLoadingError(_ModuleBaseException):
         def __init__(self, *args, **kwargs):
             super().__init__(error_title = "File not loaded", *args, **kwargs)
 
-    class FileCorruptedError(ModuleBaseException):
+    class FileCorruptedError(_ModuleBaseException):
         def __init__(self, *args, **kwargs):
             super().__init__(error_title = "File corrupted", *args, **kwargs)
 
-    class ReservedValueError(ModuleBaseException):
+    class ReservedValueError(_ModuleBaseException):
         def __init__(self, *args, **kwargs):
             error_title = "Invalid value, these values are reserved: " + ", ".join(_RESERVED_NAMES)
             super().__init__(error_title = error_title, *args, **kwargs)
@@ -57,13 +59,13 @@ class _BaseContactsClass:
     @classmethod
     def _save_file(cls,
                    new_file: dict,
-                   **kwargs) -> NoReturn:
+                   force_mode: bool = False
+                   ) -> None:
 
         logger.debug("Saving function started.")
 
         binary_data = json.dumps(new_file).encode()
         encrypted_data = cls._xor_exchange(binary_data, **kwargs)
-        force_mode = kwargs.pop("force_mode", False)
         open_mode = "wb" if force_mode else "xb"
 
         try:
@@ -127,30 +129,30 @@ class _BaseContactsClass:
             raise ReservedValueError(error_message = error_message)
 
 
-class ContactsCreate(_BaseContactsClass):
+class ContactsCreate(_BaseContactsClass, metaclass = _CallableClassMeta, class_call_method = "_create_contacts_file"):
 
-    class FileCreatingError(ModuleBaseException):
+    class FileCreatingError(_ModuleBaseException):
         def __init__(self, *args, **kwargs):
             super().__init__(error_title = "File creating failed", *args, **kwargs)
 
-    def __new__(cls,
-                platform: str,
-                api_key_name: str,
-                api_key_value: Optional[str] = None,
-                set_default: Optional[bool] = True,
-                force_mode: Optional[bool] = False,
-                autoconfirm: Optional[bool] = False
-                ) -> NoReturn:
+    @classmethod
+    def _create_contacts_file(cls,
+                              api_key_name: str,
+                              api_key_value: Optional[str] = None,
+                              set_default: Optional[bool] = True,
+                              force_mode: Optional[bool] = False,
+                              autoconfirm: Optional[bool] = False
+                              ) -> None:
 
 
-        cls._check_reserved_values([platform, api_key_name])
+        cls._check_reserved_values([api_key_name])
 
         if not api_key_value and not force_mode:
             error_message = "Empty api-key value. Use force-mode to save leer value, or provide valid API-key"
             raise cls.FileCreatingError(error_message)
 
         contacts_dict = cls._file_structure
-        contacts_dict[api_key_name] = cls.key_structure
+        contacts_dict[api_key_name] = cls.__key_structure
 
         if set_default:
             contacts_dict["default"] = api_key_name
@@ -184,28 +186,30 @@ class ContactsCreate(_BaseContactsClass):
             raise FileCreatingError("Operation aborted by user")
 
 
-class ContactsGet(_BaseContactsClass):
+class ContactsGet(_BaseContactsClass, metaclass = _CallableClassMeta, class_call_method = "_get_updates"):
 
-
-    class Message(NamedTuple):
+    # @dataclass
+    class Message:
         chat_id: int
         username: str
         first_name: str
         text: str
 
 
-    class GetContactsError(ModuleBaseException):
+    class GetContactsError(_ModuleBaseException):
         def __init__(self, *args, **kwargs,):
             super().__init__(*args, **kwargs, error_title = "Getting contacts error")
 
 
-    def __new__(api_key_name: str,
-                manual_api_key: str = None,
-                filter_username: str = None,
-                filter_text: str = None
-                ) -> NoReturn:
+    @classmethod
+    def _get_updates(cls,
+                     api_key_name: str,
+                     manual_api_key: str = None,
+                     filter_username: str = None,
+                     filter_text: str = None
+                     ) -> NoReturn:
 
-        contacts_dict = ContactsFile._load_file()
+        contacts_dict = cls._load_file()
 
         if api_key_name not in contacts_dict:
             error = f"api-key '{api_key_name}' is not exists in contacts file"
@@ -401,11 +405,11 @@ class ContactsGet(_BaseContactsClass):
 
 class ContactsCopy(_BaseContactsClass):
 
-    class DecryptionError(ModuleBaseException):
+    class DecryptionError(_ModuleBaseException):
         def __init__(self, *args, **kwargs):
             super().__init__(error_title = "Decryption error", *args, **kwargs)
 
-    class EncryptionError(ModuleBaseException):
+    class EncryptionError(_ModuleBaseException):
         def __init__(self, *args, **kwargs):
             super().__init__(error_title = "Encryption error", *args, **kwargs)
 
@@ -431,9 +435,9 @@ class ContactsCopy(_BaseContactsClass):
             logger.info("Decryption successfully proceeded")
 
         except FileExistsError as e:
-             error_message = f"File '{file_path}' already exists. Use force mode to overwrite."
-             logger.error(error_message)
-             raise cls.DecryptionError(e, error_message = error_message) from e
+            error_message = f"File '{file_path}' already exists. Use force mode to overwrite."
+            logger.error(error_message)
+            raise cls.DecryptionError(e, error_message = error_message) from e
 
         except (PermissionError, IOError) as e:
             logger.error(e)
@@ -464,20 +468,19 @@ class ContactsEdit(_BaseContactsClass):
 
     '''
 
-    class EditingError(ModuleBaseException):
+    class EditingError(_ModuleBaseException):
         def __init__(self, *args, **kwargs):
             super().__init__(error_title = "File editing error", *args, **kwargs)
 
     @classmethod
-    def add_api_key(cls,
-                    platform: str,
-                    api_key_name: str,
-                    api_key_value: Optional[str] = None,
-                    file_key: Optional[bytes] = None,
-                    set_default: Optional[bool] = False,
-                    force_mode: Optional[bool] = False,
-                    autoconfirm: Optional[bool] = False,
-                    ) -> NoReturn:
+    def add_key(cls,
+                api_key_name: str,
+                api_key_value: Optional[str] = None,
+                file_key: Optional[bytes] = None,
+                set_default: Optional[bool] = False,
+                force_mode: Optional[bool] = False,
+                autoconfirm: Optional[bool] = False,
+                ) -> None:
 
         contacts_dict = cls._load_file()
 
@@ -494,7 +497,7 @@ class ContactsEdit(_BaseContactsClass):
                 error = "API-key is not provided, use force mode to save key without value"
                 raise cls.EditingError(error)
 
-            Checkers.check_api_key(api_key = api_key)
+            Dispatcher.check_api_key(api_key = api_key)
 
         if api_key is None and not autoconfirm:
 
@@ -508,7 +511,7 @@ class ContactsEdit(_BaseContactsClass):
                 elif action.lower() == "y":
                     break
 
-        contacts_dict[api_key_name] = cls.key_structure
+        contacts_dict[api_key_name] = cls._key_structure
         contacts_dict[api_key_name]["api_key"] = api_key
 
         if set_default:
@@ -520,15 +523,21 @@ class ContactsEdit(_BaseContactsClass):
         is_default = ", the key set as default" if set_default else ""
         logger.info(f"api-key '{api_key_name}' saved" + api_is_none + is_default)
 
+    def del_key(api_key_name) -> None:
+        pass
 
-class ContactsShow(_BaseContactsClass):
+class ContactsShow(_BaseContactsClass, metaclass = _CallableClassMeta, class_call_method = "_print_contacts"):
 
-    def __new__(cls) -> NoReturn:
+    @classmethod
+    def _print_contacts(cls) -> None:
 
         contacts_dict = cls._load_file()
 
         pp = pprint.PrettyPrinter()
         pp.pprint(contacts_dict)
+
+        # here will be logic to print contacts with filter, only one value, with custom formating etc.
+
 
         # api_key_contacts = contacts_dict.get(api_key_name, None)
 
@@ -545,79 +554,70 @@ class ContactsShow(_BaseContactsClass):
         #     print(*contacts)
 
 
-class CreateSendingConfigs(_BaseContactsClass):
+class CreateDispatcher(_BaseContactsClass, metaclass = _CallableClassMeta, class_call_method = "_dispatcher_factory"):
 
     '''
-    read contacts file for chat id accoring gived names and return a SendingCofigs object.
+    read contacts file for chat id accoring gived names and return a Dispatcher object.
 
+    main arguments:
+    api_key_name: str - name of saved api-key, default is "default" - saved in contacts default chat_name
+
+    recipients arguments:
+    bulk_groups: string or itarable of strings with names of bulk groups as stored
+    chat_names: same as bulk_groups, but more accurate (bulk_groups are stored as sets, chat_names as dictionary)
+    manual_chats: integer or iterable of integers(dictonaries as {int: name})
+
+    optional hidden arguments:
+    api_key_value: str - if you dont save api_key to contacts file, you have to provide it now
+    file_key: str - if use not default one.
+    found_only: bool - dont raise an error, if some name of bulk_group or chat_name is not found
     '''
 
-    class ConfigsCreatingError(ModuleBaseException):
+    class DispatcherConfiguratingError(_ModuleBaseException):
         def __init__(self, *args, **kwargs):
-            super().__init__(*args, **kwargs, error_title = "An error occurred during creating sending configurations")
+            super().__init__(*args, **kwargs, error_title = "An error occurred during creating configurations for despatcher")
 
-    def __new__(cls,
-                platform: str = "default",
-                api_key_name: str = "default",
-                chat_names: Union[str, Iterable[str]] = None,
-                bulk_groups: Union[str, Iterable[str]] = None,
-                manual_chats: Union[int, Iterable[int]] = None,
-                found_only: bool = False,
-                **kwargs) -> SendingConfigs:
-
-        '''
-        main arguments:
-        platform: str - telegram/whatsapp/discord etc (currently telegram only)
-        api_key_name: str - name of saved api-key (probably will add re as an option)
-
-        recipients arguments:
-        manual_chats: integer or iterable of integers(dictonaries as {int: name})
-        bulk_groups: string or itarable of strings with names of bulk groups as stored
-        chat_names: same as bulk_groups, but more accurate (bulk_groups are stored as sets, chat_names as dictionary)
-
-        optional hidden arguments:
-        api_key_value: str - if you dont save api_key to contacts file, you have to provide it now
-        file_key: str - if use not default one.
-        found_only: bool - dont raise an error, if some name of bulk_group or chat_name is not found
-        '''
+    @classmethod
+    def _dispatcher_factory(cls,
+                            api_key_name: str = "default",
+                            chat_names: Union[str, Iterable[str]] = None,
+                            bulk_groups: Union[str, Iterable[str]] = None,
+                            manual_chats: Union[int, Iterable[int]] = None,
+                            found_only: bool = False,
+                            **kwargs
+                            ) -> Dispatcher:
 
         deeper_kwargs = {key: kwargs[key] for key in ["file_key"] if key in kwargs}
         contacts_dict = cls._load_file(**deeper_kwargs)
 
 
-        if platform not in contacts_dict:
-            error_message = f"Platform '{platform}' is not found in contacts file"
-            raise cls.ConfigsCreatingError(error_message = error_message)
-        elif platform == "default":
-            platform = contacts_dict["default"]
-            logger.debug("Using default platform.")
-
-
-        if api_key_name not in contacts_dict[platform]:
+        if api_key_name not in contacts_dict:
             error_message = f"Api-key '{api_key_name}' not found in list associated with platform '{platform}'."
-            raise cls.ConfigsCreatingError(error_message = error_message)
+            raise cls.DispatcherConfigurationError(error_message = error_message)
+
         elif api_key_name == "default":
-            api_key_name = contacts_dict[platform]["default"]
+            api_key_name = contacts_dict["default"]
             logger.debug("Using default api-key")
 
-        api_key_value = contacts_dict[platform][api_key_name]["api_key_value"]
+        api_key_value = contacts_dict[api_key_name]["api_key_value"]
 
         if kwargs.get("api_key_value"):
 
             if api_key_value:
                 error_message = f"Another api-key saved to by name '{api_key_name}' and cannot be replaced."
                 raise cls.CreatingConfiurationsError(error_message = error_message)
+
             else:
                 api_key_value = kwargs["api_key_value"]
 
 
         if all(arg is None for arg in (chat_names, bulk_groups, manual_chats)):
             error_message = "No recipients specified."
-            raise cls.ConfigsCreatingError(error_message = error_message)
+            raise cls.DispatcherConfiguratingError(error_message = error_message)
 
         recipients = dict()
         not_found = []
-        contacts_subdict = contacts_dict[platform][api_key_name]
+        contacts_subdict = contacts_dict[api_key_name]
 
 
         if manual_chats is not None:
@@ -626,8 +626,10 @@ class CreateSendingConfigs(_BaseContactsClass):
 
             if isinstance(manual_chats, int):
                 manual_chats = {manual_chats}
+
             elif isinstance(manual_chats, dict):
                 recipients.update(manual_chats)
+
             else:
                 manual_chats = dict.fromkeys(manual_chats, "manually provided")
                 recipients.update(manual_chats)
@@ -689,7 +691,7 @@ class CreateSendingConfigs(_BaseContactsClass):
             error_message = "These names were not found:\n" + "\n".join(not_found)
 
             if found_only:
-                raise cls.ConfigsCreatingError(error_message = error_message)
+                raise cls.DispatcherConfigurationError(error_message = error_message)
 
             else:
                 logger.info(error_message)
@@ -697,7 +699,7 @@ class CreateSendingConfigs(_BaseContactsClass):
 
         if not recipients:
             error_message = "Recipients list is leer"
-            raise cls.ConfigsCreatingError(error_message = error_message)
+            raise cls.DispatcherConfigurationError(error_message = error_message)
 
-        return SendingConfigs(api_key_value = api_key_value, api_key_name = api_key_name, recipients = recipients)
+        return Dispatcher(api_key = api_key_value, api_key_name = api_key_name, recipients = recipients)
 

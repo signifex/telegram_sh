@@ -32,7 +32,7 @@ import sys
 from typing import List, Literal, Union, Optional, NoReturn
 
 from . import logger
-from .utilities import ModuleBaseException
+from .utilities import _ModuleBaseException
 from .dispatcher import Dispatcher
 from .contacts import ContactsCreate, ContactsEdit, ContactsCopy, ContactsGet
 
@@ -64,7 +64,7 @@ class Handler:
     sending good and bad messages or/and files (and control sum of packages for sure).
     '''
 
-    class HandlerError(ModuleBaseException):
+    class HandlerError(_ModuleBaseException):
         def __init__(self, **kwargs):
             super.__init__(error_title = "Wrong arguments", **kwargs)
 
@@ -111,7 +111,7 @@ class Handler:
             exit_status = cls._status_printer(status_dictionaries,
                                               print_success = print_success)
 
-        except ModuleBaseException as e:
+        except _ModuleBaseException as e:
 
             exit_status = 1
 
@@ -129,7 +129,7 @@ class Handler:
             return exit_status
 
 
-    def _status_printer(status: Dispatcher.SendingStatus, print_success = True) -> EXIT_STATUS:
+    def _status_printer(status, print_success = True) -> EXIT_STATUS:
 
         exit_status = 0
 
