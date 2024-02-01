@@ -1,6 +1,7 @@
 import json
 import hashlib
 import os
+import ctypes
 import configparser
 import pprint
 
@@ -14,29 +15,34 @@ from .dispatcher import Dispatcher
 
 class _BaseContactsClass:
 
-    _file_structure = {
+    _FILE_STRUCTURE = {
         "default": None,
     }
 
-    _key_structure = {
+    _KEY_TEMPLATE = {
         "api_key": None,
         "contacts": {},
         "bulk_groups": {},
         "default": None
     }
 
-    _configs_file_name = "configs.ini"
-    _contacts_file_name = ".tgsend.contacts"
-    _module_directory = os.path.dirname(os.path.realpath(__file__))
-    _configs_file_path = os.path.join(_module_directory, _configs_file_name)
-    _contacts_file_path = os.path.join(_module_directory, _contacts_file_name)
+    _CONTACTS_FILE_NAME = ".tgsend.contacts"
+    _C_LIB_FILE_NAME = "tgsend.so"
 
-    configurations = configparser.ConfigParser()
-    configurations.read(_configs_file_path)
+    _MODULE_DIRECTORY = os.path.dirname(os.path.realpath(__file__))
 
-    _DEFAULT_FILE_KEY = configurations["keys"]["default_file_key"]
+    _C_LIB_FILE_PATH = os.path.join(_MODULE_DIRECTORY, _C_LIB_FILE_NAME)
+    _CONTACTS_FILE_PATH = os.path.join(_MODULE_DIRECTORY, _CONTACTS_FILE_NAME)
 
-    _RESERVED_NAMES = set(_file_structure).union(_key_structure)
+    _RESERVED_NAMES = set(_FILE_STRUCTURE).union(_KEY_TEMPLATE)
+
+    # def read_and_decrypt_file(file_path):
+    #     with open(file_path, 'rb') as file:
+    #         encrypted_data = file.read()
+
+    #     decrypted_data = xor_exchange(encrypted_data)
+    #     return decrypted_data
+
 
     class FileSavingError(_ModuleBaseException):
         def __init__(self, *args, **kwargs):
@@ -55,9 +61,13 @@ class _BaseContactsClass:
             error_title = "Invalid value, these values are reserved: " + ", ".join(_RESERVED_NAMES)
             super().__init__(error_title = error_title, *args, **kwargs)
 
+    class FileNotFoundError(_ModuleBaseException):
+        def __init__(self, *args, **kwargs):
+            super().__init__(error_title = "File not found", *args, **kwargs)
+
 
     @classmethod
-    def _save_file(cls,
+    def _save_contacts_file(cls,
                    new_file: dict,
                    force_mode: bool = False
                    ) -> None:
@@ -69,7 +79,7 @@ class _BaseContactsClass:
         open_mode = "wb" if force_mode else "xb"
 
         try:
-            with open(cls._contacts_file_path, mode = open_mode) as file:
+            with open(cls._CONTACTS_FILE_PATH, mode = open_mode) as file:
                 file.write(encrypted_data)
 
             logger.debug("Saving function completed successfully.")
@@ -80,8 +90,8 @@ class _BaseContactsClass:
 
 
     @classmethod
-    def _load_file(cls,
-                   file_path: Optional[str] = _contacts_file_path,
+    def _load_contacts_file(cls,
+                   file_path: Optional[str] = _CONTACTS_FILE_PATH,
                    **kwargs) -> Dict:
 
         logger.debug(f"Loading of {file_path} started")
@@ -99,26 +109,39 @@ class _BaseContactsClass:
 
         except (FileNotFoundError, json.JSONDecodeError) as e:
             logger.error(f"An error occurred during loading: {e}")
-            raise cls.FileLoadingError(e)
+            raise cls.FileLoadingError(e) from e
 
 
     @classmethod
     def _xor_exchange(cls,
                       input_data: bytearray,
-                      file_key: str = _DEFAULT_FILE_KEY
+                      file_key: str = None
                       ) -> bytearray:
+
+        try:
+            lib = ctypes.CDLL(cls._C_LIB_FILE_PATH)
+        except OSError as e:
+            raise cls.FileNotFoundError(e) from e
+
+
+        lib.xor_exchange.argtypes = [ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t, ctypes.POINTER(ctypes.c_ubyte)]
+        lib.xor_exchange.restype = ctypes.POINTER(ctypes.c_ubyte)
 
         logger.debug(f"Byte excahnge started.")
 
-        byte_key = hashlib.sha512(file_key.encode()).digest()
-        exchanged_data = b""
+        if file_key:
+            file_key = hashlib.sha512(file_key).digest()
 
-        for i, byte in enumerate(input_data):
-            exchanged_data += bytes([byte ^ byte_key[i % len(byte_key)]])
+        data_len = len(input_data)
+        input_data_c = (ctypes.c_ubyte * data_len)(*input_data)
+        result = lib.xor_exchange(input_data_c, data_len, file_key)
+
+        exchanged_data = bytearray(result[i] for i in range(data_len))
 
         logger.debug(f"Byte excahnge finished.")
 
         return exchanged_data
+
 
 
     @classmethod
@@ -151,8 +174,8 @@ class ContactsCreate(_BaseContactsClass, metaclass = _CallableClassMeta, class_c
             error_message = "Empty api-key value. Use force-mode to save leer value, or provide valid API-key"
             raise cls.FileCreatingError(error_message)
 
-        contacts_dict = cls._file_structure
-        contacts_dict[api_key_name] = cls.__key_structure
+        contacts_dict = cls._FILE_STRUCTURE
+        contacts_dict[api_key_name] = cls.__KEY_TEMPLATE
 
         if set_default:
             contacts_dict["default"] = api_key_name
@@ -175,7 +198,7 @@ class ContactsCreate(_BaseContactsClass, metaclass = _CallableClassMeta, class_c
                     elif action.lower() == "y":
                         break
 
-            cls._save_file(contacts_dict)
+            cls._save_contacts_file(contacts_dict)
 
             print("Contacts file successfully created")
 
@@ -209,7 +232,7 @@ class ContactsGet(_BaseContactsClass, metaclass = _CallableClassMeta, class_call
                      filter_text: str = None
                      ) -> NoReturn:
 
-        contacts_dict = cls._load_file()
+        contacts_dict = cls._load_contacts_file()
 
         if api_key_name not in contacts_dict:
             error = f"api-key '{api_key_name}' is not exists in contacts file"
@@ -419,11 +442,11 @@ class ContactsCopy(_BaseContactsClass):
                 force_mode: Optional[bool] = False,
                 **kwargs)-> NoReturn:
 
-        contact_file = cls._load_file(**kwargs)
+        contact_file = cls._load_contacts_file(**kwargs)
 
         mode = "w" if force_mode else "x"
 
-        file_path = os.path.join(cls._module_directory, "tgsend.contacts.decrypted") if not file_path else file_path
+        file_path = os.path.join(cls._MODULE_DIRECTORY, "tgsend.contacts.decrypted") if not file_path else file_path
 
         logger.info(f"File's path will be: {file_path}")
 
@@ -453,7 +476,7 @@ class ContactsCopy(_BaseContactsClass):
         try:
             with open(file_path, "r") as copy:
                 contact_file = json.load(copy)
-            cls._save_file(contact_file, **kwargs)
+            cls._save_contacts_file(contact_file, **kwargs)
             logger.info("File encrypted")
 
         except (FileNotFoundError, IOError, json.JSONDecodeError) as e:
@@ -482,7 +505,7 @@ class ContactsEdit(_BaseContactsClass):
                 autoconfirm: Optional[bool] = False,
                 ) -> None:
 
-        contacts_dict = cls._load_file()
+        contacts_dict = cls._load_contacts_file()
 
         if api_key_name in _RESERVED_NAMES:
             raise EditingError(cls.ReservedValueError)
@@ -511,13 +534,13 @@ class ContactsEdit(_BaseContactsClass):
                 elif action.lower() == "y":
                     break
 
-        contacts_dict[api_key_name] = cls._key_structure
+        contacts_dict[api_key_name] = cls._KEY_TEMPLATE
         contacts_dict[api_key_name]["api_key"] = api_key
 
         if set_default:
             contacts_dict["default"] = api_key_name
 
-        cls._save_file(contacts_dict)
+        cls._save_contacts_file(contacts_dict)
 
         api_is_none = ", the key value is empty" if api_key is None else ""
         is_default = ", the key set as default" if set_default else ""
@@ -531,7 +554,7 @@ class ContactsShow(_BaseContactsClass, metaclass = _CallableClassMeta, class_cal
     @classmethod
     def _print_contacts(cls) -> None:
 
-        contacts_dict = cls._load_file()
+        contacts_dict = cls._load_contacts_file()
 
         pp = pprint.PrettyPrinter()
         pp.pprint(contacts_dict)
@@ -588,7 +611,7 @@ class CreateDispatcher(_BaseContactsClass, metaclass = _CallableClassMeta, class
                             ) -> Dispatcher:
 
         deeper_kwargs = {key: kwargs[key] for key in ["file_key"] if key in kwargs}
-        contacts_dict = cls._load_file(**deeper_kwargs)
+        contacts_dict = cls._load_contacts_file(**deeper_kwargs)
 
 
         if api_key_name not in contacts_dict:

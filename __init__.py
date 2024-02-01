@@ -3,6 +3,7 @@ _logging.basicConfig(level=_logging.WARNING)
 logger = _logging.getLogger(__name__)
 
 from .dispatcher import Dispatcher
+from .tglogger import TgLogger
 from .contacts import (ContactsCreate,
                        ContactsEdit,
                        ContactsCopy,
@@ -10,4 +11,3 @@ from .contacts import (ContactsCreate,
                        ContactsShow,
                        CreateDispatcher
                        )
-

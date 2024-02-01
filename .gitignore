@@ -12,6 +12,10 @@ out*
 draft*
 some*
 
+# compiled c file
+*.dll
+*.so
+
 # default name for decrypted contacts file
 tgsend.contacts.decrypted
 

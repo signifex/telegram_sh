@@ -1,43 +1,33 @@
+# internet shit
 import urllib.request, urllib.parse, urllib.error
 import json
 import socket
 
+# concurrenting execution stuff
 import asyncio
 from threading import Lock
 from concurrent.futures import ThreadPoolExecutor
 from collections import deque
 
+# other stuff and type hints
 from io import BytesIO
 from typing import List, Set, Dict, Tuple, NamedTuple, Literal, Union, Iterable, BinaryIO, Optional, NoReturn
 
+# local imports
 from . import logger
-from .utilities import _ModuleBaseException, _TimeStamp
-
-import sys
+from .utilities import _ModuleBaseException, _TimeStamp, Checkers
 
 class Dispatcher:
 
-    class MissedModuleError(_ModuleBaseException):
-        def __init__(*args, **kwargs):
-            super().__init__(*args, **kwargs, error_title = "Module 'aiohttp' or 'requests' is required to send files")
-
     class FilesAmountError(_ModuleBaseException):
         def __init__(*args, **kwargs):
-            super().__init__(*args, **kwargs, error_title = "Currently unable to send this type of message")
+            super().__init__(*args, **kwargs, error_title = "10 file per 1 message")
 
     class DispatcherInitializationError(_ModuleBaseException):
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs, error_title = "An error occurred during initialization of the despatcher")
 
-    class FileCheckFailed(_ModuleBaseException):
-        def __init__(self, *args, **kwargs):
-            super().__init__(*args, **kwargs, error_name = "Check failed")
-
-    class ApiKeyCheckFailed(_ModuleBaseException):
-        def __init__(self, *args, **kwargs):
-            super().__init__(*args, **kwargs, error_name = "Check failed")
-
-    _methods = {
+    _METHODS = {
 
     "document": {
         "api_method": "sendDocument",
@@ -111,9 +101,10 @@ class Dispatcher:
                  recipients: Dict[int, str],
                  log_size: int = 10,
                  print_status: bool = True,
+                 extra_return: bool = False,
                  ) -> None:
 
-        self.check_api_key(api_key)
+        Checkers.check_api_key(api_key)
 
         if not all(isinstance(key, int) for key in recipients.keys()):
             raise self.DispatcherInitializationError("All recipeints must be represented as a dictionary [int: str]. "
@@ -123,16 +114,17 @@ class Dispatcher:
         self.__thread_lock = Lock()
         self._api_key_name = api_key_name
         self._recipients = recipients
-        self._recipients_amount = len(recipients)
         self._logs = deque(maxlen = log_size * self._recipients_amount)
         self.print_status = print_status
+        self.extra_return = extra_return
 
     def __repr__(self) -> str:
         return ("Dispatcher configurations:\n"
                 f"  Name of API-key: {self._api_key_name}\n"
                 f"  Amount of recipients: {self._recipients_amount}\n"
                 f"  Logs chache: {len(self._logs)}/{self._logs.maxlen}\n"
-                f"  Status printing: {self.print_status}")
+                f"  Status printing: {self.print_status}\n"
+                f"  Extra return: {self.extra_return}")
 
     def __enter__(self, io_object):
         pass
@@ -140,6 +132,9 @@ class Dispatcher:
     def __exit__(self, exc_type, exc_value, traceback):
         pass
 
+    @property
+    def _recipients_amount(self):
+        return len(self._recipients)
 
     def send_message(self, message: str) -> None:
 
@@ -157,6 +152,7 @@ class Dispatcher:
                                        message,
                                        self._logs,
                                        self.print_status,
+                                       self.extra_return,
                                        self.__thread_lock
                                        )
                        for recipient in self._recipients.items()
@@ -168,6 +164,7 @@ class Dispatcher:
                               message: str,
                               logging_queue: deque,
                               print_status: bool,
+                              extra_return: bool,
                               thread_lock: Lock
                               ) -> None:
 
@@ -178,6 +175,7 @@ class Dispatcher:
         data = urllib.parse.urlencode(params).encode("utf-8")
 
         key = _TimeStamp.log()
+        description = f"Message from: {key}; recipient: {chat_id}; {chat_name}; "
 
         try:
             with urllib.request.urlopen(message_url, data) as response:
@@ -185,31 +183,36 @@ class Dispatcher:
                 response_json = json.loads(response_data)
 
             if response_json.get("ok"):
-                description = f"Message from {key}, recipient: {chat_id}; {chat_name}, successfully delivered"
+                description += "Successfully delivered"
 
             else:
                 error_description = response_json.get("description", "Unknown error")
-                description = f"Message from {key}, recipient: {chat_id}; {chat_name}, not delivered: {error_description}"
+                description += f"Not delivered: {error_description}"
 
         except urllib.error.HTTPError as e:
-            description = f"Message from {key}, recipient: {chat_id}; {chat_name}, not delivered: HTTP Error {e.code} - {e.reason}"
+            description += f"HTTP Error {e.code}: {e.reason}"
 
         except urllib.error.URLError as e:
-            description = f"Message from {key}, recipient: {chat_id}; {chat_name}, not delivered: URL Error - {e.reason}"
+            description += f"URL Error: {e.reason}"
 
         except socket.timeout:
-            description = f"Message from {key}, recipient: {chat_id}; {chat_name}, not delivered: Timeout Error - The request timed out"
+            description += "Timeout Error: The request timed out"
 
         except Exception as e:
-            description = f"Message from {key}, recipient: {chat_id}; {chat_name}, not delivered: General Error - {str(e)}"
+            description += f"General Error: {str(e)}"
 
         finally:
+
             with thread_lock:
                 logging_queue.append(description)
+
                 if print_status:
-                    print(description + "\n")
-                    ## \n for bpython, overvise its will join description with own new line symbol ">>>"
-                    ## so mb just add a flag, to overvise it
+
+                    if extra_return:
+                        description += "\n"
+
+                    print(description)
+
 
     def send_file(self, packets: Union[str, list[str]], packets_type: str = "doc") -> None:
 
@@ -221,9 +224,9 @@ class Dispatcher:
         # for packet in packets:
 
 
-    def send_open_file(self, packets: Union[BytesIO, list[BytesIO]], packets_type: str = "doc") -> None:
-        if isinstance(packets, BytesIO):
-            packets = [packets]
+    # def send_open_file(self, packets: Union[BytesIO, list[BytesIO]], packets_type: str = "doc") -> None:
+    #     if isinstance(packets, BytesIO):
+    #         packets = [packets]
 
     @staticmethod
     def _execute_files_send(message_url: str, recipient: Tuple[int, str], message: str) -> str:
@@ -261,173 +264,59 @@ class Dispatcher:
         return full_data, headers
 
 
-    def _sync_file_handler(self,
-                           packets: List[str],
-                           as_doc: bool = False,
-                           caption: Optional[str] = None
-                           ) -> str:
+    # def _sync_file_handler(self,
+    #                        packets: List[str],
+    #                        as_doc: bool = False,
+    #                        caption: Optional[str] = None
+    #                        ) -> str:
 
-        if packet_type == "audiofiles":
-            url = f"https://api.telegram.org/bot{self.api_key}/sendAudio"
+    #     if packet_type == "audiofiles":
+    #         url = f"https://api.telegram.org/bot{self.api_key}/sendAudio"
 
-        else:
-            url = f"https://api.telegram.org/bot{self.api_key}/sendDocument"
+    #     else:
+    #         url = f"https://api.telegram.org/bot{self.api_key}/sendDocument"
 
-        open_files = [("document", open(packet, "rb")) for packet in packets]
+    #     open_files = [("document", open(packet, "rb")) for packet in packets]
 
-        tasks = [self._files_dispatcher(url, open_files, recipient_id, recipient_name, caption)
-                 for recipient_id, recipient_name in self.recipients.items()
-                 ]
-
-
-
-    async def _files_dispatcher(self,
-                                url: str,
-                                open_files: List[BinaryIO],
-                                recipient_id: int,
-                                recipient_name: str,
-                                caption: Optional[str]
-                                ) -> NoReturn:
-
-        data = {"chat_id": recipient_id}
-
-        if caption:
-            data["caption"] = caption
-
-        response = await requests.post(url, data = data, files = open_files)
-
-        key = Utilities.key_timestamp()
-
-        if response.status_code == 200:
-           self._sending_success[key] =  f"recipient: {recipient_id}/{recipient_name}"
-
-        else:
-           description = f"recipient: {recipient_id}/{recipient_name}\n" + str(json.loads(response.content)["description"])
-           self._sending_errors[key] = description
+    #     tasks = [self._files_dispatcher(url, open_files, recipient_id, recipient_name, caption)
+    #              for recipient_id, recipient_name in self.recipients.items()
+    #              ]
 
 
 
-    def send_audiofiles(self, packets: List[str]) -> str:
+    # async def _files_dispatcher(self,
+    #                             url: str,
+    #                             open_files: List[BinaryIO],
+    #                             recipient_id: int,
+    #                             recipient_name: str,
+    #                             caption: Optional[str]
+    #                             ) -> NoReturn:
 
-        cls.check_audiofiles(packets = packets)
+    #     data = {"chat_id": recipient_id}
 
-        checksum = len(self.recipients) * len(packets)
+    #     if caption:
+    #         data["caption"] = caption
 
-        asyncio.run(self._file_handler(packets = packets, p_type = "audiofiles"))
+    #     response = await requests.post(url, data = data, files = open_files)
 
-        return SendingStatus(success = self._sending_success, fail = self._sending_errors, checksum = checksum)
+    #     key = Utilities.key_timestamp()
 
+    #     if response.status_code == 200:
+    #        self._sending_success[key] =  f"recipient: {recipient_id}/{recipient_name}"
 
-    @staticmethod
-    def check_api_key(api_key: str) -> NoReturn:
-
-        url = f"https://api.telegram.org/bot{api_key}/getMe"
-
-        try:
-            response = urllib.request.urlopen(url)
-            data = json.load(response)
-
-            if not data["ok"]:
-                raise cls.ApiKeyCheckFailed("API-key's check failed")
-
-        except (urllib.error.URLError, urllib.error.HTTPError) as e:
-            raise cls.ApiKeyCheckFailed(e) from e
-
-        finally:
-            logger.info("API-key's check passed")
+    #     else:
+    #        description = f"recipient: {recipient_id}/{recipient_name}\n" + str(json.loads(response.content)["description"])
+    #        self._sending_errors[key] = description
 
 
 
-    @classmethod
-    def get_file_type(cls, packet: str) -> Tuple[str, str]:
-        pass
+    # def send_audiofiles(self, packets: List[str]) -> str:
 
-    @staticmethod
-    def guess_mime_type(file_input):
-        if isinstance(file_input, BytesIO):
-            # Additional logic for BytesIO objects might be required
-            return 'application/octet-stream'
-        else:
-            mime_type, _ = mimetypes.guess_type(file_input)
-            return mime_type if mime_type else 'application/octet-stream'
+    #     cls.check_audiofiles(packets = packets)
 
+    #     checksum = len(self.recipients) * len(packets)
 
+    #     asyncio.run(self._file_handler(packets = packets, p_type = "audiofiles"))
 
-    def check_files(cls, packets: List[str]) -> NoReturn:
-
-        fucked_up_packages = {}
-
-        for packet in packets:
-
-            if not os.path.exists(packet):
-                fucked_up_packages[packet] = "File not found"
-
-            elif not os.path.isfile(packet):
-                fucked_up_packages[packet] = "Not a file"
-
-            elif os.path.getsize(packet) == 0:
-                fucked_up_packages[packet] = "File must be not empty"
-
-            elif os.path.getsize(packet) > cls._MAX_SIZE:
-                readable_size = Utilities.format_bytes(os.path.getsize(packet))
-                fucked_up_packages[packet] = f"File must be less than 50 MB, this file is {readable_size}"
-
-        if fucked_up_packages:
-            error_message = "\n\t" + "\n\t".join([f"{key}: {value}" for key, value in fucked_up_packages.items()])
-            raise cls.CheckFailed(error_message)
-
-
-    @classmethod
-    def check_open_files(cls, packets: BytesIO) -> bool:
-        pass
-
-    # @classmethod
-    # def check_audiofiles(cls, packets: List[str]) -> NoReturn:
-
-    #     allowed_formats = ["mp3", "ogg", "wav"]
-
-    #     fucked_up_packages = {}
-
-    #     for packet in packets:
-
-    #         if not os.path.exists(packet):
-    #             fucked_up_packages[packet] = "File not found"
-
-    #         elif not os.path.isfile(packet):
-    #             fucked_up_packages[packet] = "Not a file"
-
-    #         elif os.path.getsize(packet) == 0:
-    #             fucked_up_packages[packet] = "File must be not empty"
-
-    #         elif os.path.getsize(packet) > cls._MAX_SIZE:
-    #             readable_size = format_bytes(os.path.getsize(packet))
-    #             fucked_up_packages[packet] = f"File must be less than 50 MB, this file is {readable_size}"
-
-    #         elif os.path.splitext(packet)[1] not in allowed_formats:
-    #             fucked_up_packages[packet] = "File has unsupported extensions, must be one of " + ", ".join(allowed_formats)
-
-    #     if fucked_up_packages:
-    #         error_message = "\n\t" + "\n\t".join([f"{key}: {value}" for key, value in fucked_up_packages.items()])
-    #         raise cls.CheckFailed(error_message)
-
-
-    # @classmethod
-    # def check_byte_string(cls, packets: List[BytesIO], size_limit: int) -> NoReturn:
-
-    #     fucked_up_packages = {}
-
-    #     for index, packet in enumerate(packets, start = 1):
-
-    #         size = sys.getsizeof(packet)
-
-    #         if not packet:
-    #             fucked_up_packages[f"FileObject {index}"] = f"File is empty"
-
-    #         elif size > cls._MAX_SIZE:
-    #             readable_size = Utilities.format_bytes(size)
-    #             fucked_up_packages[f"FileObject {index}"] = f"File must be less than 50 MB, this file is {readable_size}"
-
-    #     if fucked_up_packages:
-    #         error_message = "\n\t" + "\n\t".join([f"{key}: {value}" for key, value in fucked_up_packages.items()])
-    #         raise cls.CheckFailed(error_message)
+    #     return SendingStatus(success = self._sending_success, fail = self._sending_errors, checksum = checksum)
 

@@ -22,6 +22,19 @@ This is the third version of the script, for next one:
 3) SENDING ALREADY OPEN DOCUMENT
 
 4) aiohttp supporting
+
+NOTE EXTRA:
+that was an old intro.
+Currently i found out how to send files without external libs, using urllib. And how to avoid its GIL locking
+Also, I compile enctyption process and integrate it using ctypes
+
+So, the plans:
+
+0) ensure that compiled lib works 100% correctly.
+1) make file sending 100 working
+2) add context manager for in-memory files
+3) remake this file for current version
+
 '''
 
 
@@ -45,7 +58,7 @@ except ImportError:
 
 # ----------------------------------------------- constants ------------------------------------------------ #
 
-EXIT_STATUS = Literal[0, 1]
+exit_status: Literal[0, 1] = 0
 
 # ------------------------------------------------ classes ------------------------------------------------- #
 

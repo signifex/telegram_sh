@@ -117,6 +117,130 @@ class _CallableClassMeta(type):
         return cls.__class_call_method(*args, **kwargs)
 
 
+class Checkers:
+
+    class FileCheckError(_ModuleBaseException):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs, error_name = "Check failed")
+
+    class ApiKeyCheckError(_ModuleBaseException):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs, error_name = "Check failed")
+
+    @classmethod
+    def check_api_key(cls, api_key: str) -> NoReturn:
+
+        url = f"https://api.telegram.org/bot{api_key}/getMe"
+
+        try:
+            response = urllib.request.urlopen(url)
+            data = json.load(response)
+
+            if not data["ok"]:
+                raise cls.ApiKeyCheckError("API-key's check failed")
+
+        except (urllib.error.URLError, urllib.error.HTTPError) as e:
+            raise cls.ApiKeyCheckError(e) from e
+
+        finally:
+            logger.info("API-key's check passed")
+
+
+    @classmethod
+    def get_file_type(cls, packet: str) -> Tuple[str, str]:
+        pass
+
+
+    @staticmethod
+    def guess_mime_type(file_input):
+        if isinstance(file_input, BytesIO):
+            # Additional logic for BytesIO objects might be required
+            return 'application/octet-stream'
+        else:
+            mime_type, _ = mimetypes.guess_type(file_input)
+            return mime_type if mime_type else 'application/octet-stream'
+
+
+
+    def check_files(cls, packets: List[str]) -> NoReturn:
+
+        fucked_up_packages = {}
+
+        for packet in packets:
+
+            if not os.path.exists(packet):
+                fucked_up_packages[packet] = "File not found"
+
+            elif not os.path.isfile(packet):
+                fucked_up_packages[packet] = "Not a file"
+
+            elif os.path.getsize(packet) == 0:
+                fucked_up_packages[packet] = "File must be not empty"
+
+            elif os.path.getsize(packet) > cls._MAX_SIZE:
+                readable_size = Utilities.format_bytes(os.path.getsize(packet))
+                fucked_up_packages[packet] = f"File must be less than 50 MB, this file is {readable_size}"
+
+        if fucked_up_packages:
+            error_message = "\n\t" + "\n\t".join([f"{key}: {value}" for key, value in fucked_up_packages.items()])
+            raise cls.CheckError(error_message)
+
+
+    @classmethod
+    def check_audiofiles(cls, packets: List[str]) -> NoReturn:
+
+        allowed_formats = ["mp3", "ogg", "wav"]
+
+        fucked_up_packages = {}
+
+        for packet in packets:
+
+            if not os.path.exists(packet):
+                fucked_up_packages[packet] = "File not found"
+
+            elif not os.path.isfile(packet):
+                fucked_up_packages[packet] = "Not a file"
+
+            elif os.path.getsize(packet) == 0:
+                fucked_up_packages[packet] = "File must be not empty"
+
+            elif os.path.getsize(packet) > cls._MAX_SIZE:
+                readable_size = format_bytes(os.path.getsize(packet))
+                fucked_up_packages[packet] = f"File must be less than 50 MB, this file is {readable_size}"
+
+            elif os.path.splitext(packet)[1] not in allowed_formats:
+                fucked_up_packages[packet] = "File has unsupported extensions, must be one of " + ", ".join(allowed_formats)
+
+        if fucked_up_packages:
+            error_message = "\n\t" + "\n\t".join([f"{key}: {value}" for key, value in fucked_up_packages.items()])
+            raise cls.CheckError(error_message)
+
+
+    @classmethod
+    def check_byte_string(cls, packets: List[BytesIO], size_limit: int) -> NoReturn:
+
+        fucked_up_packages = {}
+
+        for index, packet in enumerate(packets, start = 1):
+
+            size = sys.getsizeof(packet)
+
+            if not packet:
+                fucked_up_packages[f"FileObject {index}"] = f"File is empty"
+
+            elif size > cls._MAX_SIZE:
+                readable_size = Utilities.format_bytes(size)
+                fucked_up_packages[f"FileObject {index}"] = f"File must be less than 50 MB, this file is {readable_size}"
+
+        if fucked_up_packages:
+            error_message = "\n\t" + "\n\t".join([f"{key}: {value}" for key, value in fucked_up_packages.items()])
+            raise cls.CheckError(error_message)
+
+
+    @classmethod
+    def check_open_files(cls, packets: BytesIO) -> bool:
+        pass
+
 class _TimeStamp:
 
     def key() -> str:
