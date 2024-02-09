@@ -1,7 +1,9 @@
 from . import Dispatcher
 from logging import Handler, LogRecord
 
+
 class TgLogger(Handler):
+
     def __init__(self, dispatcher: Dispatcher, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.dispatcher = dispatcher

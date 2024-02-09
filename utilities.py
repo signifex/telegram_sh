@@ -1,65 +1,72 @@
 import traceback
 import datetime
-import mimetypes
 import urllib.request
 import json
+import sys
 
-from io import BytesIO
-from typing import Dict, Union, List, Tuple, BinaryIO, Optional, Iterable, NoReturn, NamedTuple
+from typing import Optional, NoReturn
 
-from . import logger
+from . import logger, DECORATIONS
+
 
 class _ModuleBaseException(Exception):
-
     """
     Base exception class to provide a consistent format for custom exceptions.
-    This class is designed to be subclassed and should not be raised directly.
 
-    _ModuleBaseException is the foundational exception class for custom exceptions in this module.
+    This class is designed to be subclassed and should not be raised directly.
+    _ModuleBaseException is the foundational exception class for custom
+    exceptions in this module.
 
     It's designed to capture and store detailed information about exceptions,
-    making it easier to handle, log, and report errors. Child exceptions derived
-    from this class can provide more specific error contexts or messages.
+    making it easier to handle, log, and report errors. Child exceptions
+    derived from this class can provide more specific error contexts
+    or messages.
 
     Attributes:
-        original_exception (Exception): The original exception that triggered the custom exception.
-                                        If no original exception is provided, it defaults to the custom exception itself.
-        name (str): Name of the exception, typically the class name. Customizable.
-        message (str): Detailed message of the error (or default error's message, will overwrite error's default message!)
-        traceback (str): Stack trace of the error.
-        log (str): Log message that combines the timestamp, error name, message, and traceback.
+    original_exception (Exception):
+       The original exception that triggered the custom exception.
+       If no original exception is provided,
+       it defaults to the custom exception itself.
 
-   Usage:
-        This class is intended to be subclassed for specific exception types and
-        should not be raised directly. When creating a child exception,
-        provide the original exception and an optional custom message to the
-        initializer. When handling the exception, you can access its attributes
-        for custom error reporting or logging.
+    name (str): Name of the exception, typically the class name.
+    message (str): Detailed message of the error
+    (or default error's message, will overwrite error's default message!)
+    traceback (str): Stack trace of the error.
+    log (str): Log message that combines the timestamp, error name,
+    message, and traceback.
 
-        Example:
-            ...
-            class CustomError(_ModuleBaseException):
-                def __init__(*args)
-                    super().__init__(args, error_title = "more functional name")
-            ...
+    Usage:
+    This class is intended to be subclassed for specific exception types
+    and should not be raised directly. When creating a child exception,
+    provide the original exception and an optional custom message to the
+    initializer. When handling the exception, you can access its attributes
+    for custom error reporting or logging.
 
-            try:
-                1/0
-            except ZeroDivisionError as e:
-                raise CustomError(e)
-            ...
+    Example:
+    ...
+    class CustomError(_ModuleBaseException):
+        def __init__(self, *args, **kwargs)
+            super().__init__(*args, **kwargs,
+                             error_title = "more functional name")
+    ...
 
-            try:
-               (call function with last try-catch block)
-            except _ModuleBaseException as e:
-                print(e)
-                print(e.log)
-                logger.error(e.traceback)
-            ...
+    try:
+        1/0
+    except ZeroDivisionError as e:
+        raise CustomError(e) from e
+    ...
+
+    try:
+       (call function with last try-catch block)
+    except _ModuleBaseException as e:
+        print(e)
+        print(e.log)
+        logger.error(e.traceback)
+    ...
 
     Note:
-        Catching `_ModuleBaseException` in error handlers will also catch all
-        its child exceptions.
+    Catching `_ModuleBaseException` in error handlers will also catch all
+    its child exceptions.
     """
 
     def __init__(self,
@@ -77,11 +84,15 @@ class _ModuleBaseException(Exception):
         self.message = str(self.original_exception) if original_exception else error_message
 
         if isinstance(original_exception, Exception):
-            self.traceback = traceback.format_exception(type(original_exception), original_exception, original_exception.__traceback__)
+            self.traceback = traceback.format_exception(type(original_exception),
+                                                        original_exception,
+                                                        original_exception.__traceback__)
+
         else:
             self.traceback = traceback.format_stack()[:-2]
 
-        self.log = "\n".join(("\n" + _TimeStamp.log(), self.__str__(), ''.join(self.traceback)))
+        self.log = "\n".join(("\n" + _TimeStamp.log(),
+                              self.__str__(), ''.join(self.traceback)))
 
         logger.error(self.log)
 
@@ -92,9 +103,9 @@ class _ModuleBaseException(Exception):
 
 
 class _CallableClassMeta(type):
-
     """
     Metaclass to make class callable at the class level.
+
     It checks that class_call_method is present in the class
     and calls it when the class is called.
     """
@@ -121,16 +132,18 @@ class Checkers:
 
     class FileCheckError(_ModuleBaseException):
         def __init__(self, *args, **kwargs):
-            super().__init__(*args, **kwargs, error_name = "Check failed")
+            super().__init__(*args, **kwargs,
+                             error_name="Check failed")
 
     class ApiKeyCheckError(_ModuleBaseException):
         def __init__(self, *args, **kwargs):
-            super().__init__(*args, **kwargs, error_name = "Check failed")
+            super().__init__(*args, **kwargs,
+                             error_name="Check failed")
 
     @classmethod
-    def check_api_key(cls, api_key: str) -> NoReturn:
+    def check_api_key(cls, api_key_value: str) -> NoReturn:
 
-        url = f"https://api.telegram.org/bot{api_key}/getMe"
+        url = f"https://api.telegram.org/bot{api_key_value}/getMe"
 
         try:
             response = urllib.request.urlopen(url)
@@ -145,101 +158,27 @@ class Checkers:
         finally:
             logger.info("API-key's check passed")
 
+    # @classmethod
+    # def check_byte_string(cls, packets: List[BytesIO],
+    #                       size_limit: int) -> NoReturn:
 
-    @classmethod
-    def get_file_type(cls, packet: str) -> Tuple[str, str]:
-        pass
+    #     fucked_up_packages = {}
 
+    #     for index, packet in enumerate(packets, start=1):
 
-    @staticmethod
-    def guess_mime_type(file_input):
-        if isinstance(file_input, BytesIO):
-            # Additional logic for BytesIO objects might be required
-            return 'application/octet-stream'
-        else:
-            mime_type, _ = mimetypes.guess_type(file_input)
-            return mime_type if mime_type else 'application/octet-stream'
+    #         size = sys.getsizeof(packet)
 
+    #         if not packet:
+    #             fucked_up_packages[f"FileObject {index}"] = f"File is empty"
 
+    #         elif size > cls._MAX_SIZE:
+    #             readable_size = Utilities.format_bytes(size)
+    #             fucked_up_packages[f"FileObject {index}"] = f"File must be less than 50 MB, this file is {readable_size}"
 
-    def check_files(cls, packets: List[str]) -> NoReturn:
+    #     if fucked_up_packages:
+    #         error_message = "\n\t" + "\n\t".join([f"{key}: {value}" for key, value in fucked_up_packages.items()])
+    #         raise cls.CheckError(error_message)
 
-        fucked_up_packages = {}
-
-        for packet in packets:
-
-            if not os.path.exists(packet):
-                fucked_up_packages[packet] = "File not found"
-
-            elif not os.path.isfile(packet):
-                fucked_up_packages[packet] = "Not a file"
-
-            elif os.path.getsize(packet) == 0:
-                fucked_up_packages[packet] = "File must be not empty"
-
-            elif os.path.getsize(packet) > cls._MAX_SIZE:
-                readable_size = Utilities.format_bytes(os.path.getsize(packet))
-                fucked_up_packages[packet] = f"File must be less than 50 MB, this file is {readable_size}"
-
-        if fucked_up_packages:
-            error_message = "\n\t" + "\n\t".join([f"{key}: {value}" for key, value in fucked_up_packages.items()])
-            raise cls.CheckError(error_message)
-
-
-    @classmethod
-    def check_audiofiles(cls, packets: List[str]) -> NoReturn:
-
-        allowed_formats = ["mp3", "ogg", "wav"]
-
-        fucked_up_packages = {}
-
-        for packet in packets:
-
-            if not os.path.exists(packet):
-                fucked_up_packages[packet] = "File not found"
-
-            elif not os.path.isfile(packet):
-                fucked_up_packages[packet] = "Not a file"
-
-            elif os.path.getsize(packet) == 0:
-                fucked_up_packages[packet] = "File must be not empty"
-
-            elif os.path.getsize(packet) > cls._MAX_SIZE:
-                readable_size = format_bytes(os.path.getsize(packet))
-                fucked_up_packages[packet] = f"File must be less than 50 MB, this file is {readable_size}"
-
-            elif os.path.splitext(packet)[1] not in allowed_formats:
-                fucked_up_packages[packet] = "File has unsupported extensions, must be one of " + ", ".join(allowed_formats)
-
-        if fucked_up_packages:
-            error_message = "\n\t" + "\n\t".join([f"{key}: {value}" for key, value in fucked_up_packages.items()])
-            raise cls.CheckError(error_message)
-
-
-    @classmethod
-    def check_byte_string(cls, packets: List[BytesIO], size_limit: int) -> NoReturn:
-
-        fucked_up_packages = {}
-
-        for index, packet in enumerate(packets, start = 1):
-
-            size = sys.getsizeof(packet)
-
-            if not packet:
-                fucked_up_packages[f"FileObject {index}"] = f"File is empty"
-
-            elif size > cls._MAX_SIZE:
-                readable_size = Utilities.format_bytes(size)
-                fucked_up_packages[f"FileObject {index}"] = f"File must be less than 50 MB, this file is {readable_size}"
-
-        if fucked_up_packages:
-            error_message = "\n\t" + "\n\t".join([f"{key}: {value}" for key, value in fucked_up_packages.items()])
-            raise cls.CheckError(error_message)
-
-
-    @classmethod
-    def check_open_files(cls, packets: BytesIO) -> bool:
-        pass
 
 class _TimeStamp:
 
@@ -252,21 +191,29 @@ class _TimeStamp:
 
 class _Interface:
 
-    def confirmation_loop():
+    global DECORATIONS
+
+    def confirmation_loop(self):
         pass
 
-    def check_contacts():
+    def check_contacts(self):
         pass
 
 
-def format_bytes(size: int) -> str:
+    def output(self, text):
+        
+    
+class _Utilities:
 
-    power = 2**10
-    n = 0
-    power_labels = {0: 'B', 1: 'KB', 2: 'MB', 3: 'GB', 4: 'TB'}
+    @staticmethod
+    def format_bytes(size: int) -> str:
 
-    while size > power:
-        size /= power
-        n += 1
+        power = 2**10
+        n = 0
+        power_labels = {0: 'B', 1: 'KB', 2: 'MB', 3: 'GB', 4: 'TB'}
 
-    return f"{size:.2f} {power_labels[n]}"
+        while size > power:
+            size /= power
+            n += 1
+
+        return f"{size:.2f} {power_labels[n]}"

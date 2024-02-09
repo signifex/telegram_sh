@@ -11,3 +11,10 @@ from .contacts import (ContactsCreate,
                        ContactsShow,
                        CreateDispatcher
                        )
+
+try:
+    import decorations
+except ImportError:
+    DECORATIONS = False
+else:
+    DECORATIONS = True
