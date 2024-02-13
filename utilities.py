@@ -1,12 +1,35 @@
+"""
+module utils:
+
+_ModuleBaseException - main exeption of the class,
+ make able to catch all modules exeption but nothing else
+
+_callableClassMeta let class return not itself by call,
+ but execute some fuction, to make code more "plain"
+
+Checkers - collection of pre-sening methods to check,
+that telegram api call will be valid,
+but files checkers are moved to dispatcher, so mb ill return it back
+or delete this one
+
+_TimeStamp return a string to make unique key for or logging-freindly time
+
+etc
+"""
 import traceback
 import datetime
 import urllib.request
 import json
-import sys
 
 from typing import Optional, NoReturn
 
-from . import logger, DECORATIONS
+from . import logger
+
+try:
+    from decorations import Colorize
+    _COLORIZE = True
+except ImportError:
+    _COLORIZE = False
 
 
 class _ModuleBaseException(Exception):
@@ -75,18 +98,23 @@ class _ModuleBaseException(Exception):
                  error_message: Optional[str] = None):
 
         if self.__class__ == _ModuleBaseException:
-            raise NotImplementedError("_ModuleBaseException should not be raised directly. Use a child class instead.")
+            error_message = "_ModuleBaseException should not be "\
+                "raised directly. Use a child class instead."
+            raise NotImplementedError(error_message)
 
-        self.original_exception = original_exception if original_exception else self
+        self.original_exception = original_exception \
+            if original_exception else self
 
         self.title = error_title if error_title else self.__class__.__name__
 
-        self.message = str(self.original_exception) if original_exception else error_message
+        self.message = str(self.original_exception) \
+            if original_exception else error_message
 
         if isinstance(original_exception, Exception):
-            self.traceback = traceback.format_exception(type(original_exception),
-                                                        original_exception,
-                                                        original_exception.__traceback__)
+            self.traceback = traceback.format_exception(
+                type(original_exception),
+                original_exception,
+                original_exception.__traceback__)
 
         else:
             self.traceback = traceback.format_stack()[:-2]
@@ -129,12 +157,11 @@ class _CallableClassMeta(type):
 
 
 class Checkers:
+    """
+    global checkers...
 
-    class FileCheckError(_ModuleBaseException):
-        def __init__(self, *args, **kwargs):
-            super().__init__(*args, **kwargs,
-                             error_name="Check failed")
-
+    to make sure, thats all part of the script will work as needed
+    """
     class ApiKeyCheckError(_ModuleBaseException):
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs,
@@ -158,40 +185,26 @@ class Checkers:
         finally:
             logger.info("API-key's check passed")
 
-    # @classmethod
-    # def check_byte_string(cls, packets: List[BytesIO],
-    #                       size_limit: int) -> NoReturn:
-
-    #     fucked_up_packages = {}
-
-    #     for index, packet in enumerate(packets, start=1):
-
-    #         size = sys.getsizeof(packet)
-
-    #         if not packet:
-    #             fucked_up_packages[f"FileObject {index}"] = f"File is empty"
-
-    #         elif size > cls._MAX_SIZE:
-    #             readable_size = Utilities.format_bytes(size)
-    #             fucked_up_packages[f"FileObject {index}"] = f"File must be less than 50 MB, this file is {readable_size}"
-
-    #     if fucked_up_packages:
-    #         error_message = "\n\t" + "\n\t".join([f"{key}: {value}" for key, value in fucked_up_packages.items()])
-    #         raise cls.CheckError(error_message)
-
 
 class _TimeStamp:
 
+    @staticmethod
     def key() -> str:
+        """
+        return time as unique key: "%Y_%m_%d_%H_%M_%S_%f"
+        """
         return datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S_%f")
 
+    @staticmethod
     def log() -> str:
+        """
+        return key for logging: "%Y.%m.%d %H:%M:%S"
+        """
         return datetime.datetime.now().strftime("%Y.%m.%d %H:%M:%S")
 
 
 class _Interface:
 
-    global DECORATIONS
 
     def confirmation_loop(self):
         pass
@@ -200,9 +213,68 @@ class _Interface:
         pass
 
 
-    def output(self, text):
-        
-    
+class _MessageFormater:
+
+    def __init__(self,
+                 use_colorize: bool,
+                 extra_return: bool
+                 ):
+        """
+        Set up an output message builder...
+
+        use_colorize - If decorations.Colrize is able to import,
+        and this flag is set to True, output messages will be formated
+        """
+
+        self.use_colorize = use_colorize
+        self.extra_return = extra_return
+        self.raw_data_storage = []
+
+    def add_text(self, text: str, **editing_args):
+        """
+        add text to message chain
+
+        kwargs are reffer to Colorize arguments
+        """
+        editing_text = {"text": text}
+        editing_text.update(editing_args)
+        self.raw_data_storage.append(editing_text)
+        return self
+
+    @property
+    def colorized_text(self):
+        """
+        main method to create a colored sting
+        (if possible)
+        """
+
+        if _COLORIZE and self.use_colorize:
+            full_message = ""
+            for part in self.raw_data_storage:
+                formatted_text = str(Colorize(**part))
+                full_message += formatted_text
+            if self.extra_return:
+                full_message += "\n"
+        else:
+            full_message = self.raw_text
+
+        return full_message
+
+    @property
+    def raw_text(self):
+        """
+        return simply chined text.
+
+        for logger or when Colorize is not found or turned off
+        """
+        full_message = ''.join(part["text"] for part
+                               in self.raw_data_storage)
+        if self.extra_return:
+            full_message += "\n"
+
+        return full_message
+
+
 class _Utilities:
 
     @staticmethod

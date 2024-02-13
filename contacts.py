@@ -31,13 +31,6 @@ class _BaseContactsClass:
 
     _RESERVED_NAMES = set(_FILE_STRUCTURE)
 
-    # def read_and_decrypt_file(file_path):
-    #     with open(file_path, 'rb') as file:
-    #         encrypted_data = file.read()
-
-    #     decrypted_data = xor_exchange(encrypted_data)
-    #     return decrypted_data
-
     class FileSavingError(_ModuleBaseException):
         def __init__(self, *args, **kwargs):
             super().__init__(error_title="File not saved", *args, **kwargs)
@@ -52,16 +45,19 @@ class _BaseContactsClass:
 
     class ReservedValueError(_ModuleBaseException):
         def __init__(self, *args, **kwargs):
-            error_title = "Invalid value, these values are reserved: " + ", ".join(_RESERVED_NAMES)
+            error_title = "Invalid value, these values are reserved: " + \
+                ", ".join(_BaseContactsClass._RESERVED_NAMES)
             super().__init__(error_title=error_title, *args, **kwargs)
 
     class FileNotFoundError(_ModuleBaseException):
         def __init__(self, *args, **kwargs):
-            super().__init__(error_title = "File not found", *args, **kwargs)
+            super().__init__(error_title="File not found",
+                             *args, **kwargs)
 
     class DefaultValueError(_ModuleBaseException):
         def __init__(self, *args, **kwargs):
-            super().__init__(error_title = "Default value error", *args, **kwargs)
+            super().__init__(error_title="Default value error",
+                             *args, **kwargs)
 
     @classmethod
     def _save_contacts_file(cls,
@@ -143,10 +139,18 @@ class _BaseContactsClass:
 
     @classmethod
     def _check_reserved_values(cls, checking_list: List[str]):
-        errors = [name for name in checking_list if name in cls._RESERVED_NAMES]
+        errors = [name for name in checking_list
+                  if name in cls._RESERVED_NAMES]
+
         if errors:
             error_message = "provided invalid values: " + ", ".join(*errors)
             raise cls.ReservedValueError(error_message=error_message)
+
+
+# class CompileEncrypter(_BaseContactsClass,
+#                        metaclass=_CallableClassMeta,
+#                        class_call_method="_create_contacts_file"):
+#     pass
 
 
 class ContactsCreate(_BaseContactsClass,
@@ -170,7 +174,8 @@ class ContactsCreate(_BaseContactsClass,
         cls._check_reserved_values([api_key_name])
 
         if not api_key_value and not force_mode:
-            error_message = "Empty api-key value. Use force-mode to save leer value, or provide valid API-key"
+            error_message = "Empty api-key value. Use force-mode" \
+                "to save a leer key value, or provide valid API-key"
             raise cls.FileCreatingError(error_message)
 
         contacts_dict = cls._FILE_STRUCTURE
@@ -184,9 +189,11 @@ class ContactsCreate(_BaseContactsClass,
         try:
 
             if not force_mode and os.path.exists(cls._path):
-                raise FileExistsError(f"file {cls._path} already exists, use force mode to overwrite or delete manually")
+                error_message = f"file {cls._path} already exists, " \
+                    "use force mode to overwrite or delete manually"
+                raise FileExistsError(error_message=error_message)
 
-            if api_key is None and not autoconfirm:
+            if api_key_value is None and not autoconfirm:
 
                 while True:
                     action = input("Save empty API-key? (y/N)")
@@ -221,7 +228,8 @@ class ContactsGet(_BaseContactsClass,
 
     class GetContactsError(_ModuleBaseException):
         def __init__(self, *args, **kwargs,):
-            super().__init__(*args, **kwargs, error_title = "Getting contacts error")
+            super().__init__(error_title="Getting contacts error",
+                             *args, **kwargs)
 
     @classmethod
     def _get_updates(cls,
@@ -234,44 +242,44 @@ class ContactsGet(_BaseContactsClass,
         contacts_dict = cls._load_contacts_file()
 
         if api_key_name not in contacts_dict:
-            error_message = f"api-key '{api_key_name}' is not exists in contacts file"
+            error_message = f"api-key '{api_key_name}' " \
+                "is not exists in contacts file"
             raise cls.GetContactsError(error_message=error_message)
 
         if manual_api_key is not None:
-            api_key = _DEFAULT_FILE_KEY
             logger.info("Api key taken from contacs file")
         else:
             api_key = manual_api_key
 
-        Chechers.check_api_key(api_key)
+        Checkers.check_api_key(api_key)
 
 
-    def _get_updates(api_key: str) -> List:
+    # def _get_updates(api_key: str) -> List:
 
-        logger.info("Getting updates from Telagram server")
+    #     logger.info("Getting updates from Telagram server")
 
-        url = f'https://api.telegram.org/bot{api_key}/getUpdates'
+    #     url = f'https://api.telegram.org/bot{api_key}/getUpdates'
 
-        with urllib.request.urlopen(url) as response_raw:
-            response = json.loads(response_raw.read())
+    #     with urllib.request.urlopen(url) as response_raw:
+    #         response = json.loads(response_raw.read())
 
-        if not response.get("ok"):
-            error = "Wrong API-call"
-            raise  (error)
+    #     if not response.get("ok"):
+    #         error = "Wrong API-call"
+    #         raise  (error)
 
-        elif response["result"] == []:
-            error = "no updates, send some message to bot, and try again"
-            raise GetContacts.GetContactsError(error)
+    #     elif response["result"] == []:
+    #         error = "no updates, send some message to bot, and try again"
+    #         raise GetContacts.GetContactsError(error)
 
-        logger.info("Returing data from Telegram server")
+    #     logger.info("Returing data from Telegram server")
 
-        return response["result"]
+    #     return response["result"]
 
-
-    def _format_messages(messages: list[Message]) -> list[Message]:
-
+    @classmethod
+    def _format_messages(cls, messages: list[Message]) -> list[Message]:
         '''
-        get "result" friom Telagram, extact values and form Message class from each message
+        get "result" from Telagram, extact values and form
+        Message class from each message
         '''
         logger.info("Messages formating starts")
 
@@ -287,19 +295,24 @@ class ContactsGet(_BaseContactsClass,
             text = message["message"].get("text", "")
 
             '''
-            formated_messages_dict[chat_id] = Message(chat_id=chat_id, username=username, first_name=first_name, text=text)
-            should be modified to use formated_messages_dict[chat_id] as the key inside the NamedTuple.
-            It should be formated_messages_dict[chat_id] = Message(message.chat_id, username, first_name, text).
+            formated_messages_dict[chat_id] =
+            Message(chat_id, username, first_name, text)
+
+            should be modified to use formated_messages_dict[chat_id]
+            as the key inside the NamedTuple.
+            It should be formated_messages_dict[chat_id] =
+            Message(message.chat_id, username, first_name, text).
 
             '''
-            formated_messages_dict[chat_id] = Message(chat_id = chat_id, username = username,
-                                                      first_name = first_name, text = text)
+            formated_messages_dict[chat_id] = cls.Message(chat_id=chat_id,
+                                                          username=username,
+                                                          first_name=first_name,
+                                                          text=text)
 
         formated_messages = [formated_messages_dict.values()]
 
         logger.info(f"returning {len(formated_messages)} messages")
         return formated_messages
-
 
     def _filter_messages(messages: List[Message],
                          existing_chat_id: List[int],
@@ -313,7 +326,8 @@ class ContactsGet(_BaseContactsClass,
         2) from username
         3) contains right message
         '''
-        logger.info(f"Start filtering messages, filter by username: {filter_username}, filter by text: {filter_text}")
+        logger.info("Start filtering messages, filter by username: "
+                    f"{filter_username}, filter by text: {filter_text}")
 
         filtered_messages = []
 
@@ -323,11 +337,11 @@ class ContactsGet(_BaseContactsClass,
                 logger.info(f"{message.chat_id} already in contacts file")
                 continue
 
-            elif filter_text != None and message.text != filter_text:
-                logger.info(f"{message.text} from {message.username}({message.chat_id}) not matches to {filter_text}")
+            elif filter_text is not None and message.text != filter_text:
+                logger.info(f"{message.text} from {message.username} ({message.chat_id}) not matches to {filter_text}")
                 continue
 
-            elif filter_username != None and message.username not in (filter_username, "NOUSERNAME"):
+            elif filter_username is not None and message.username not in (filter_username, "NOUSERNAME"):
                 logger.info(f"{message.username}({message.chat_id}) not matches to {filter_username}")
                 continue
 
@@ -424,16 +438,17 @@ class ContactsGet(_BaseContactsClass,
                     print(c_message)
 
 
-
 class ContactsCopy(_BaseContactsClass):
 
     class DecryptionError(_ModuleBaseException):
         def __init__(self, *args, **kwargs):
-            super().__init__(error_title = "Decryption error", *args, **kwargs)
+            super().__init__(error_title="Decryption error",
+                             *args, **kwargs)
 
     class EncryptionError(_ModuleBaseException):
         def __init__(self, *args, **kwargs):
-            super().__init__(error_title = "Encryption error", *args, **kwargs)
+            super().__init__(error_title="Encryption error",
+                             *args, **kwargs)
 
     @classmethod
     def decrypt(cls,
@@ -457,7 +472,8 @@ class ContactsCopy(_BaseContactsClass):
             logger.info("Decryption successfully proceeded")
 
         except FileExistsError as e:
-            error_message = f"File '{file_path}' already exists. Use force mode to overwrite."
+            error_message = f"File '{file_path}' already exists. "\
+                "Use force mode to overwrite."
             logger.error(error_message)
             raise cls.DecryptionError(e, error_message = error_message) from e
 
@@ -483,8 +499,8 @@ class ContactsCopy(_BaseContactsClass):
         else:
             logger.info("File encrypted")
 
-class ContactsEdit(_BaseContactsClass):
 
+class ContactsEdit(_BaseContactsClass):
     '''
     Edit contacts file
 
@@ -492,7 +508,8 @@ class ContactsEdit(_BaseContactsClass):
 
     class EditingError(_ModuleBaseException):
         def __init__(self, *args, **kwargs):
-            super().__init__(error_title = "File editing error", *args, **kwargs)
+            super().__init__(error_title="Contacts file editing error",
+                             *args, **kwargs)
 
     @classmethod
     def add_key(cls,
@@ -512,14 +529,16 @@ class ContactsEdit(_BaseContactsClass):
         if not force_mode:
 
             if api_key_name in contacts_dict:
-                error = "API-key with this name already exists, use force-mode to override or choose another name"
+                error = "API-key with this name already exists, "\
+                    "use force-mode to override or choose another name"
                 raise cls.EditingError(error)
 
             elif api_key_value is None:
-                error = "API-key is not provided, use force mode to save key without value"
+                error = "API-key is not provided, "\
+                "use force mode to save key without value"
                 raise cls.EditingError(error)
 
-            Checkers.check_api_key(api_key_value = api_key_value)
+            Checkers.check_api_key(api_key_value=api_key_value)
 
         if api_key_value is None and not autoconfirm:
 
@@ -528,7 +547,7 @@ class ContactsEdit(_BaseContactsClass):
 
                 if not action or action.lower() == "n":
                     error = "Operation aborted by user"
-                    raise EditingError(error)
+                    raise cls.EditingError(error)
 
                 elif action.lower() == "y":
                     break
@@ -550,7 +569,10 @@ class ContactsEdit(_BaseContactsClass):
     def set_default() -> None:
         pass
 
-class ContactsShow(_BaseContactsClass, metaclass = _CallableClassMeta, class_call_method = "_print_contacts"):
+
+class ContactsShow(_BaseContactsClass,
+                   metaclass = _CallableClassMeta,
+                   class_call_method = "_print_contacts"):
 
     @classmethod
     def _print_contacts(cls) -> None:
@@ -578,28 +600,46 @@ class ContactsShow(_BaseContactsClass, metaclass = _CallableClassMeta, class_cal
         #     print(*contacts)
 
 
-class CreateDispatcher(_BaseContactsClass, metaclass = _CallableClassMeta, class_call_method = "_dispatcher_factory"):
+class CreateDispatcher(_BaseContactsClass,
+                       metaclass=_CallableClassMeta,
+                       class_call_method="_dispatcher_factory"):
 
     '''
-    read contacts file for chat id accoring gived names and return a Dispatcher object.
+    read contacts file for chat id accoring gived names and return
+    a Dispatcher object.
 
     main arguments:
-    api_key_name: str - name of saved api-key, default is "default" - saved in contacts default chat_name
+    api_key_name: str - name of saved api-key, default is "default" -
+    saved in contacts default chat_name
+
 
     recipients arguments:
-    bulk_groups: string or itarable of strings with names of bulk groups as stored
-    chat_names: same as bulk_groups, but more accurate (bulk_groups are stored as sets, chat_names as dictionary)
-    manual_chats: integer or iterable of integers(dictonaries as {int: name})
+
+    bulk_groups: string or itarable of strings
+    with names of bulk groups as stored
+
+    chat_names: same as bulk_groups, but more accurate
+    (bulk_groups are stored as sets, chat_names as dictionary)
+
+    manual_chats: integer or iterable of integers
+    (dictonaries as {int: name})
+
 
     optional hidden arguments:
-    api_key_value: str - if you dont save api_key to contacts file, you have to provide it now
+
+    api_key_value: str - if you dont save api_key to contacts file,
+    you have to provide it now
+
     file_key: str - if use not default one.
-    found_only: bool - dont raise an error, if some name of bulk_group or chat_name is not found
+
+    found_only: bool - dont raise an error,
+    if some name of bulk_group or chat_name is not found
     '''
 
     class DispatcherConfiguratingError(_ModuleBaseException):
         def __init__(self, *args, **kwargs):
-            super().__init__(*args, **kwargs, error_title = "An error occurred during creating configurations for despatcher")
+            error_title = "An error occurred during creating configurations for despatcher"
+            super().__init__(*args, **kwargs, error_title=error_title)
 
     @classmethod
     def _dispatcher_factory(cls,
@@ -611,45 +651,53 @@ class CreateDispatcher(_BaseContactsClass, metaclass = _CallableClassMeta, class
                             **kwargs
                             ) -> Dispatcher:
 
-        deeper_kwargs = {key: kwargs[key] for key in ["file_key"] if key in kwargs}
-        contacts_dict = cls._load_contacts_file(**deeper_kwargs)
+        deeper_kwargs = {key: kwargs[key] for key in ["file_key"]
+                         if key in kwargs}
 
+        contacts_dict = cls._load_contacts_file(**deeper_kwargs)
 
         if api_key_name == "default":
             api_key_name = contacts_dict.get("default_bot")
             logger.debug("Using default api-key")
 
             if api_key_name not in contacts_dict["bots"]:
-                error_message = f"default value {api_key_name} is not presented in saved contacts list"
-                raise cls.DefaultValueError(error_message = error_message)
+                error_message = f"default value {api_key_name} "\
+                    "is not presented in saved contacts list"
+                raise cls.DefaultValueError(error_message=error_message)
 
         if api_key_name not in contacts_dict["bots"]:
-            error_message = f"Api-key '{api_key_name}' not found in list of saved bots' names."
-            raise cls.DispatcherConfigurationError(error_message = error_message)
+            error_message = f"Api-key '{api_key_name}' not found in list of "\
+                "saved bots' names."
+            raise cls.DispatcherConfigurationError(error_message=error_message)
 
         api_key_value = contacts_dict["bots"][api_key_name]
 
         if kwargs.get("api_key_value"):
 
             if api_key_value:
-                error_message = f"Another api-key saved to by name '{api_key_name}' and cannot be replaced."
-                raise cls.CreatingConfiurationsError(error_message = error_message)
+                error_message = f"Another api-key saved to by name" \
+                    f"'{api_key_name}' and cannot be replaced."
+                raise cls.CreatingConfiurationsError(
+                    error_message=error_message)
 
             else:
                 api_key_value = kwargs["api_key_value"]
-
 
         if all(arg is None for arg in (chat_names, bulk_groups, manual_chats)):
 
             default_chat = contacts_dict["default_chat"]
 
             if not default_chat:
-                error_message = "No recipients specified. Default chat is not specified"
-                raise cls.DispatcherConfiguratingError(error_message = error_message)
+                error_message = "No recipients specified. "\
+                    "Default chat is not specified"
+                raise cls.DispatcherConfiguratingError(
+                    error_message=error_message)
 
             elif default_chat not in contacts_dict["chat_names"]:
-                error_message = f"Default value {default_chat} is not presented in saved contacts list"
-                raise cls.DefaultValueError(error_message = error_message)
+                error_message = f"Default value {default_chat} "\
+                    "is not presented in saved contacts list"
+                raise cls.DefaultValueError(
+                    error_message=error_message)
 
             else:
                 chat_names = default_chat
@@ -657,7 +705,7 @@ class CreateDispatcher(_BaseContactsClass, metaclass = _CallableClassMeta, class
         recipients = dict()
         not_found = []
 
-        if manual_chats is not None:
+        if manual_chats:
 
             logger.debug("Adding manually provided items.")
 
@@ -671,12 +719,13 @@ class CreateDispatcher(_BaseContactsClass, metaclass = _CallableClassMeta, class
                 manual_chats = dict.fromkeys(manual_chats, "manually provided")
                 recipients.update(manual_chats)
 
-
-        if bulk_groups is not None:
+        if bulk_groups:
 
             logger.info("Adding bulk groups.")
 
-            searching_groups = {bulk_groups} if isinstance(bulk_groups, str) else set(bulk_groups)
+            searching_groups = {bulk_groups} if isinstance(bulk_groups, str) \
+                else set(bulk_groups)
+
             existing_groups = set(contacts_dict["bulk_groups"])
 
             found_groups = searching_groups.intersection(existing_groups)
@@ -686,11 +735,14 @@ class CreateDispatcher(_BaseContactsClass, metaclass = _CallableClassMeta, class
 
                 for group in found_groups:
 
-                    adding_group = dict.fromkeys(contacts_dict["bulk_groups"][group],
-                                                 f"bulk group '{group}'")
+                    adding_group = dict.fromkeys(
+                        contacts_dict["bulk_groups"][group],
+                        f"bulk group '{group}'")
 
-                    overwriting_recipients = {key: f"{recipients[key]}, bulk group '{group}'"
-                                              for key in adding_group.keys() & recipients.keys()}
+                    overwriting_recipients = {
+                        key: f"{recipients[key]}, bulk group '{group}'"
+                        for key in adding_group.keys() & recipients.keys()
+                    }
 
                     recipients.update(adding_group)
                     recipients.update(overwriting_recipients)
@@ -698,11 +750,12 @@ class CreateDispatcher(_BaseContactsClass, metaclass = _CallableClassMeta, class
             if not_found_groups:
                 not_found.append("bulk_groups: " + ", ".join(not_found_groups))
 
-        if chat_names is not None:
+        if chat_names:
 
             logger.info("Adding chat names.")
 
-            searching_chats = {chat_names} if isinstance(chat_names, str) else set(chat_names)
+            searching_chats = {chat_names} if isinstance(chat_names, str) \
+                else set(chat_names)
             existing_chats = contacts_dict["chat_names"]
 
             found_chats = searching_chats.intersection(existing_chats.keys())
@@ -710,7 +763,8 @@ class CreateDispatcher(_BaseContactsClass, metaclass = _CallableClassMeta, class
 
             if found_chats:
 
-                adding_chats = {existing_chats[name]: f"chat name '{name}'" for name in found_chats}
+                adding_chats = {existing_chats[name]: f"chat name '{name}'"
+                                for name in found_chats}
 
                 overwriting_recipients = {key: f"{recipients[key]}, chat name '{name}'"
                                           for name in adding_chats.keys() & recipients.keys()}
@@ -718,17 +772,17 @@ class CreateDispatcher(_BaseContactsClass, metaclass = _CallableClassMeta, class
                 recipients.update(adding_chats)
                 recipients.update(overwriting_recipients)
 
-
             if not_found_chats:
                 not_found.append("chat_names: " + ", ".join(not_found_chats))
 
-
         if not_found:
 
-            error_message = "These names were not found:\n" + "\n".join(not_found)
+            error_message = ("These names were not found:\n"
+                             "\n".join(not_found))
 
             if found_only:
-                raise cls.DispatcherConfigurationError(error_message = error_message)
+                raise cls.DispatcherConfigurationError(
+                    error_message=error_message)
 
             else:
                 logger.info(error_message)
@@ -736,7 +790,9 @@ class CreateDispatcher(_BaseContactsClass, metaclass = _CallableClassMeta, class
 
         if not recipients:
             error_message = "Recipients list is leer"
-            raise cls.DispatcherConfigurationError(error_message = error_message)
+            raise cls.DispatcherConfigurationError(error_message=error_message)
 
-        return Dispatcher(api_key = api_key_value, api_key_name = api_key_name, recipients = recipients)
-
+        return Dispatcher(api_key_value=api_key_value,
+                          api_key_name=api_key_name,
+                          recipients=recipients,
+                          **kwargs)
