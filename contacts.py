@@ -7,7 +7,7 @@ import pprint
 from typing import List, Dict, Union, Iterable, Optional, NoReturn
 
 from . import logger
-from .utilities import _ModuleBaseException, _CallableClassMeta, Checkers
+from .utilities import ModuleBaseException, _CallableClassMeta, Checkers
 from .dispatcher import Dispatcher
 
 
@@ -31,30 +31,30 @@ class _BaseContactsClass:
 
     _RESERVED_NAMES = set(_FILE_STRUCTURE)
 
-    class FileSavingError(_ModuleBaseException):
+    class FileSavingError(ModuleBaseException):
         def __init__(self, *args, **kwargs):
             super().__init__(error_title="File not saved", *args, **kwargs)
 
-    class FileLoadingError(_ModuleBaseException):
+    class FileLoadingError(ModuleBaseException):
         def __init__(self, *args, **kwargs):
             super().__init__(error_title="File not loaded", *args, **kwargs)
 
-    class FileCorruptedError(_ModuleBaseException):
+    class FileCorruptedError(ModuleBaseException):
         def __init__(self, *args, **kwargs):
             super().__init__(error_title="File corrupted", *args, **kwargs)
 
-    class ReservedValueError(_ModuleBaseException):
+    class ReservedValueError(ModuleBaseException):
         def __init__(self, *args, **kwargs):
             error_title = "Invalid value, these values are reserved: " + \
                 ", ".join(_BaseContactsClass._RESERVED_NAMES)
             super().__init__(error_title=error_title, *args, **kwargs)
 
-    class FileNotFoundError(_ModuleBaseException):
+    class FileNotFoundError(ModuleBaseException):
         def __init__(self, *args, **kwargs):
             super().__init__(error_title="File not found",
                              *args, **kwargs)
 
-    class DefaultValueError(_ModuleBaseException):
+    class DefaultValueError(ModuleBaseException):
         def __init__(self, *args, **kwargs):
             super().__init__(error_title="Default value error",
                              *args, **kwargs)
@@ -157,7 +157,7 @@ class ContactsCreate(_BaseContactsClass,
                      metaclass=_CallableClassMeta,
                      class_call_method="_create_contacts_file"):
 
-    class FileCreatingError(_ModuleBaseException):
+    class FileCreatingError(ModuleBaseException):
         def __init__(self, *args, **kwargs):
             super().__init__(error_title="File creating failed",
                              *args, **kwargs)
@@ -226,7 +226,7 @@ class ContactsGet(_BaseContactsClass,
         first_name: str
         text: str
 
-    class GetContactsError(_ModuleBaseException):
+    class GetContactsError(ModuleBaseException):
         def __init__(self, *args, **kwargs,):
             super().__init__(error_title="Getting contacts error",
                              *args, **kwargs)
@@ -440,12 +440,12 @@ class ContactsGet(_BaseContactsClass,
 
 class ContactsCopy(_BaseContactsClass):
 
-    class DecryptionError(_ModuleBaseException):
+    class DecryptionError(ModuleBaseException):
         def __init__(self, *args, **kwargs):
             super().__init__(error_title="Decryption error",
                              *args, **kwargs)
 
-    class EncryptionError(_ModuleBaseException):
+    class EncryptionError(ModuleBaseException):
         def __init__(self, *args, **kwargs):
             super().__init__(error_title="Encryption error",
                              *args, **kwargs)
@@ -506,7 +506,7 @@ class ContactsEdit(_BaseContactsClass):
 
     '''
 
-    class EditingError(_ModuleBaseException):
+    class EditingError(ModuleBaseException):
         def __init__(self, *args, **kwargs):
             super().__init__(error_title="Contacts file editing error",
                              *args, **kwargs)
@@ -636,7 +636,7 @@ class CreateDispatcher(_BaseContactsClass,
     if some name of bulk_group or chat_name is not found
     '''
 
-    class DispatcherConfiguratingError(_ModuleBaseException):
+    class DispatcherConfiguratingError(ModuleBaseException):
         def __init__(self, *args, **kwargs):
             error_title = "An error occurred during creating configurations for despatcher"
             super().__init__(*args, **kwargs, error_title=error_title)

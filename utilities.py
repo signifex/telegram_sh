@@ -1,7 +1,7 @@
 """
 module utils:
 
-_ModuleBaseException - main exeption of the class,
+ModuleBaseException - main exeption of the class,
  make able to catch all modules exeption but nothing else
 
 _callableClassMeta let class return not itself by call,
@@ -32,12 +32,12 @@ except ImportError:
     _COLORIZE = False
 
 
-class _ModuleBaseException(Exception):
+class ModuleBaseException(Exception):
     """
     Base exception class to provide a consistent format for custom exceptions.
 
     This class is designed to be subclassed and should not be raised directly.
-    _ModuleBaseException is the foundational exception class for custom
+    ModuleBaseException is the foundational exception class for custom
     exceptions in this module.
 
     It's designed to capture and store detailed information about exceptions,
@@ -67,7 +67,7 @@ class _ModuleBaseException(Exception):
 
     Example:
     ...
-    class CustomError(_ModuleBaseException):
+    class CustomError(ModuleBaseException):
         def __init__(self, *args, **kwargs)
             super().__init__(*args, **kwargs,
                              error_title = "more functional name")
@@ -81,14 +81,14 @@ class _ModuleBaseException(Exception):
 
     try:
        (call function with last try-catch block)
-    except _ModuleBaseException as e:
+    except ModuleBaseException as e:
         print(e)
         print(e.log)
         logger.error(e.traceback)
     ...
 
     Note:
-    Catching `_ModuleBaseException` in error handlers will also catch all
+    Catching `ModuleBaseException` in error handlers will also catch all
     its child exceptions.
     """
 
@@ -97,8 +97,8 @@ class _ModuleBaseException(Exception):
                  error_title: Optional[str] = None,
                  error_message: Optional[str] = None):
 
-        if self.__class__ == _ModuleBaseException:
-            error_message = "_ModuleBaseException should not be "\
+        if self.__class__ == ModuleBaseException:
+            error_message = "ModuleBaseException should not be "\
                 "raised directly. Use a child class instead."
             raise NotImplementedError(error_message)
 
@@ -138,17 +138,20 @@ class _CallableClassMeta(type):
     and calls it when the class is called.
     """
 
-    def __new__(metacls, name, bases, namespace, class_call_method):
+    def __new__(mcs, name, bases, namespace, class_call_method):
 
         if class_call_method not in namespace:
-            raise AttributeError(f"'{class_call_method}' method not found in {name}")
+            error_message = f"'{class_call_method}' method not found in {name}"
+            raise AttributeError(error_message)
 
-        cls = super().__new__(metacls, name, bases, namespace)
+        cls = super().__new__(mcs, name, bases, namespace)
 
         cls.__class_call_method = namespace[class_call_method]
 
         if not callable(cls.__class_call_method):
-            raise AttributeError(f"'{class_call_method}' must be a callable method in {name}")
+            error_message = (f"'{class_call_method}' must be a "
+                             f"callable method in {name}")
+            raise AttributeError(error_message)
 
         return cls
 
@@ -162,7 +165,7 @@ class Checkers:
 
     to make sure, thats all part of the script will work as needed
     """
-    class ApiKeyCheckError(_ModuleBaseException):
+    class ApiKeyCheckError(ModuleBaseException):
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs,
                              error_name="Check failed")

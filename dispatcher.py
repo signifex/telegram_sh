@@ -1,7 +1,5 @@
 # internet shit
-import urllib.request
-import urllib.parse
-import urllib.error
+
 import http.client
 import json
 import socket
@@ -16,19 +14,32 @@ from collections import deque
 import os
 import mimetypes
 from io import BytesIO
+from dataclasses import dataclass
 from typing import List, Dict, Tuple, Union, Optional, NoReturn
 
 # local imports
 from . import logger
-from .utilities import (_ModuleBaseException,
+from .utilities import (ModuleBaseException,
                         _TimeStamp,
                         _Utilities,
                         _MessageFormater,
                         Checkers)
 
 
-class Dispatcher:
+@dataclass(slots=True)
+class DispatcherSettings:
+    """
+    simple class that stores all dispatcher settings and makes possible
+    to provide the same pool of settings to different dispatchers
+    """
+    print_status: bool
+    autoswitch_file_type: bool
+    skip_invalid_files: bool
+    extra_return: bool
+    use_colorize: bool
 
+
+class Dispatcher:
     """
     Main class of the script...
 
@@ -37,37 +48,61 @@ class Dispatcher:
     configurated recipients concurrently
     """
 
-    class FilesAmountError(_ModuleBaseException):
+    class FilesAmountError(ModuleBaseException):
+        """
+        error for trying to send to big amount of files
+        """
         def __init__(self, *args, **kwargs):
             error_title = "This amount of files is not able to this "\
                     "sending method"
             super().__init__(error_title=error_title,
                              *args, **kwargs )
 
-    class FilesTypeError(_ModuleBaseException):
+    class FilesTypeError(ModuleBaseException):
+        """
+        error should be raised if sending_method doesnt support some types
+        of providen files like .pdf for photo
+        """
         def __init__(self, *args, **kwargs):
             super().__init__(error_title="Wrong file type",
                              *args, **kwargs)
 
-    class FileProcessingError(_ModuleBaseException):
+    class FileProcessingError(ModuleBaseException):
+        """
+        global check, must show all problem files as text
+        """
         def __init__(self, *args, **kwargs):
             error_title = "Pre-check of the files failed"
             super().__init__(error_title=error_title,
                              *args, **kwargs)
 
-    class DispatcherInitializationError(_ModuleBaseException):
+    class DispatcherInitializationError(ModuleBaseException):
+        """
+        Attempt to init dispatcher is failed
+        """
         def __init__(self, *args, **kwargs):
             error_title = "An error occurred during initialization "\
                     "of the despatcher"
             super().__init__(error_title=error_title,
                              *args, **kwargs)
 
+    class TelegramAPIError(ModuleBaseException):
+        """
+        Custom exception class for Telegram API errors.
+        """
+        def __init__(self, *args, **kwargs):
+            error_title = "Invalid API call"
+            super().__init__(error_title=error_title,
+                             *args, **kwargs)
+
+    _50MB = 50 * 1024 * 1024
+
     _METHODS = {
 
         "document": {
             "api_method": "sendDocument",
             "mime_types": ["application/octet-stream"],
-            "max_file_size": 50 * 1024 * 1024,
+            "max_file_size": _50MB,
             "max_files_amount": 10
         },
 
@@ -83,7 +118,7 @@ class Dispatcher:
             "api_method": "sendAudio",
             "mime_types": ["audio/mpeg", "audio/mp3"],
             "supporting_formats": [".mp3", ".mpeg"],
-            "max_file_size": 50 * 1024 * 1024,
+            "max_file_size": _50MB,
             "max_files_amount": 10
         },
 
@@ -91,7 +126,7 @@ class Dispatcher:
             "api_method": "sendVideo",
             "mime_types": ["video/mp4", "video/quicktime"],
             "supporting_formats": [".mp4", ".mov"],
-            "max_file_size": 50 * 1024 * 1024,
+            "max_file_size": _50MB,
             "max_files_amount": 10
         },
 
@@ -99,7 +134,7 @@ class Dispatcher:
             "api_method": "sendAnimation",
             "mime_types": ["video/mp4", "video/quicktime"],
             "supporting_formats": [".mp4", ".gif"],
-            "max_file_size": 50 * 1024 * 1024,
+            "max_file_size": _50MB,
             "max_files_amount": 1
         },
 
@@ -107,7 +142,7 @@ class Dispatcher:
             "api_method": "sendVoice",
             "mime_types": ["audio/ogg", "audio/mpeg"],
             "supporting_formats": [".ogg", ".mp3"],
-            "max_file_size": 50 * 1024 * 1024,
+            "max_file_size": _50MB,
             "max_files_amount": 1
         },
 
@@ -115,7 +150,7 @@ class Dispatcher:
             "api_method": "sendVideoNote",
             "mime_types": ["video/mp4"],
             "supporting_formats": [".mp4"],
-            "max_file_size": 50 * 1024 * 1024,
+            "max_file_size": _50MB,
             "max_files_amount": 1
         },
 
@@ -128,11 +163,13 @@ class Dispatcher:
         }
     }
 
+    __url_base = "api.telegram.org"
+
     def __init__(self,
                  api_key_value: str,
                  api_key_name: str,
                  recipients: Dict[int, str],
-                 print_status: Optional[bool] = True,
+                 settings: Optional[DispatcherSettings] = None,
                  **kwargs):
 
         Checkers.check_api_key(api_key_value)
@@ -151,34 +188,55 @@ class Dispatcher:
             raise self.DispatcherInitializationError(
                 error_message=error_message)
 
-        self.__base_url = f"https://api.telegram.org/bot{api_key_value}/"
+        self.__url_bot = f"/bot{api_key_value}/"
         self.__thread_lock = threading.Lock()
         self._api_key_name = api_key_name
         self._recipients = recipients
-        self.print_status = print_status
 
-        self._logs = deque(maxlen=self._recipients_amount *
+        self._logs = deque(maxlen=self._num_recipients *
                            kwargs.get("log_size", 10))
 
-        self.autoswitch_file_type = kwargs.get("autoswitch_file_type", False)
-        self.skip_invalid_files = kwargs.get("skip_invalid_files", False)
-
-        self._message_formater_args = {
-            "extra_return": kwargs.get("extra_return", False),
-            "use_colorize": kwargs.get("use_colorize", True)
-        }
+        self.settings = settings if settings else DispatcherSettings(
+            print_status=kwargs.get("print_status", True),
+            autoswitch_file_type=kwargs.get("autoswitch_file_type", False),
+            skip_invalid_files=kwargs.get("skip_invalid_files", False),
+            extra_return=kwargs.get("extra_return", False),
+            use_colorize=kwargs.get("use_colorize", True)
+            )
 
     def __repr__(self) -> str:
-        return ("Dispatcher configurations:\n"
-                f"  Name of API-key: {self._api_key_name}\n"
-                f"  Amount of recipients: {self._recipients_amount}\n"
-                f"  Logs cache: {len(self._logs)}/{self._logs.maxlen}\n"
-                f"  Status printing: {self.print_status}\n"
-                "  Switch to document type instead of raising an error:"
-                f" {self.autoswitch_file_type}")
+        message_formater = _MessageFormater(
+            use_colorize=self.settings.use_colorize,
+            extra_return=False
+        )
+
+        message_formater\
+            .add_text("\n>>> Dispatcher Instance Overview:\n",
+                      color="cyan", bold=True)\
+            .add_text("    API Key Name: ")\
+            .add_text(self._api_key_name, color="magenta", bold=True)\
+            .add_text("\n    Recipient Count: ")\
+            .add_text(str(self._num_recipients),
+                      color="magenta", bold=True)\
+            .add_text("\n    Logs cache: ")\
+            .add_text(f"{len(self._logs)}/{self._logs.maxlen}",
+                      color="magenta", bold=True)\
+            .add_text("\n\n>>> Operational Settings:\n",
+                      color="cyan", bold=True)\
+            .add_text("    (modifiable via <")\
+            .add_text("settings", bold=True)\
+            .add_text("> attribute)\n")
+
+        for attr in self.settings.__slots__:
+            attr_value = getattr(self.settings, attr)
+            message_formater.add_text(f"    {attr}: ")\
+                .add_text(f"{attr_value}\n", bold=True,
+                          color="green" if attr_value else "red")
+
+        return message_formater.colorized_text
 
     @property
-    def _recipients_amount(self):
+    def _num_recipients(self):
         return len(self._recipients)
 
     def __enter__(self):
@@ -199,13 +257,10 @@ class Dispatcher:
                 "max 4096 symbols per one message"
             raise ValueError(error_message)
 
-        message_url = self.__base_url + "sendMessage"
-
         # for getting errors from threads
 
         # with ThreadPoolExecutor() as executor:
-        #     futures = [executor.submit(self._execute_message_send,
-        #                                message_url,
+        #    2 futures = [executor.submit(self._execute_message_send,
         #                                recipient,
         #                                message,
         #                                self._logs,
@@ -220,74 +275,74 @@ class Dispatcher:
         with ThreadPoolExecutor() as executor:
             for recipient in self._recipients.items():
                 executor.submit(self._execute_message_send,
-                                message_url=message_url,
                                 recipient=recipient,
                                 message=message)
 
     def _execute_message_send(self,
-                              message_url: str,
-                              recipient: Tuple[int, str],
-                              message: str,
-                              ) -> None:
+                              recipient: tuple[int, str],
+                              message: str) -> None:
 
-        params = {"chat_id": recipient[0], "text": message}
+        request_url = self.__url_bot + "sendMessage"
+        request_headers = {'Content-type': 'application/json'}
+        request_body = json.dumps({"chat_id": recipient[0],
+                                   "text": message})
 
-        data = urllib.parse.urlencode(params).encode("utf-8")
+        conn = http.client.HTTPSConnection(self.__url_base)
 
-        message_formater = _MessageFormater(**self._message_formater_args)
+        message_formater = _MessageFormater(
+            use_colorize=self.settings.use_colorize,
+            extra_return=self.settings.extra_return)
 
         message_formater.add_text("Message from: ")\
             .add_text(_TimeStamp.log(), bold=True)\
-            .add_text(" Recipient: ")\
+            .add_text("; Bot: ")\
+            .add_text(self._api_key_name, bold=True)\
+            .add_text("; Recipient: ")\
             .add_text(str(recipient[0]), bold=True)\
             .add_text("; ")\
             .add_text(recipient[1], bold=True)\
             .add_text("; Status: ")
 
         try:
-            with urllib.request.urlopen(message_url, data) as response:
-                response_data = response.read().decode("utf-8")
-                response_json = json.loads(response_data)
+            conn.request(method="POST",
+                         url=request_url,
+                         body=request_body,
+                         headers=request_headers)
+            response = conn.getresponse()
 
-            if response_json.get("ok"):
-                message_formater.add_text("Successfully delivered",
-                                          color="green", bold=True)
-
-            else:
-                error_description = response_json.get("description",
-                                                      "Unknown error")
-
-                message_formater.add_text("Not delivered: ",
-                                          bold=True, color="red")\
-                    .add_text(error_description)
-
-        except urllib.error.HTTPError as e:
-            message_formater.add_text(f"HTTP Error {e.code}",
-                                      color="red", bold=True)\
-                .add_text(": ")\
-                .add_text(e.reason)
-
-        except urllib.error.URLError as e:
-            message_formater.add_text("URL Error", color="red", bold=True)\
-                .add_text(": ")\
-                .add_text(e.reason)
+        except http.client.HTTPException as e:
+            message_formater.add_text(
+                f"HTTP Error {e}", color="red", bold=True)
 
         except socket.timeout:
-            message_formater.add_text("Timeout Error: The request timed out",
-                                      color="red")
+            message_formater.add_text(
+                "Timeout Error: The request timed out", color="red")
 
         except Exception as e:
-            message_formater.add_text("General Error",
-                                      color="red", bold=True)\
-                .add_text(": ")\
-                .add_text(str(e))
+            message_formater.add_text(
+                "General Error", color="red", bold=True)\
+                .add_text(f": {str(e)}")
+
+        else:
+            response_data = response.read().decode("utf-8")
+            response_json = json.loads(response_data)
+
+            if response_json.get("ok"):
+                message_formater.add_text(
+                    "Successfully delivered", color="green", bold=True)
+            else:
+                error_description = response_json.get(
+                    "description", "Unknown error")
+                message_formater\
+                    .add_text("Not delivered", bold=True, color="red")\
+                    .add_text(": ")\
+                    .add_text(error_description)
 
         finally:
-
+            conn.close()
             with self.__thread_lock:
                 self._logs.append(message_formater.raw_text)
-
-                if self.print_status:
+                if self.settings.print_status:
                     print(message_formater.colorized_text)
 
     def send_file(self,
@@ -470,6 +525,7 @@ class Dispatcher:
         return f"\r\n--{boundary}--\r\n".encode('utf-8')
 
     def send_file_to_telegram(self, chat_id, file_path, bot_token):
+
         boundary = '----WebKitFormBoundary' + str(uuid.uuid4()).replace('-', '')
         filename = file_path.split('/')[-1]
 
@@ -512,14 +568,14 @@ class Dispatcher:
         connection.close()
 
 
-    bot_token = os.getenv("tg_lazy_bot")
-    chat_id = os.getenv("chat_ing")
-    file_path = 'examples/example.png'
+    # bot_token = os.getenv("tg_lazy_bot")
+    # chat_id = os.getenv("chat_ing")
+    # file_path = 'examples/example.png'
 
-    chat_ids = [chat_id, chat_id]  # List of chat IDs
+    # chat_ids = [chat_id, chat_id]  # List of chat IDs
 
-    for chat_id in chat_ids:
-        send_file_to_telegram(chat_id, file_path, bot_token)
+    # for chat_id in chat_ids:
+    #     send_file_to_telegram(chat_id, file_path, bot_token)
 
     # def _check_files(self, file_paths: List[str], sending_method) -> Tuple[List[str], List[str]]:
 
