@@ -8,7 +8,7 @@
 - Different recipients groups: created object of the class `Dispatcher` will store API-key and group of recipients.
 - `Async`: sending messages or files proceeding to all recipients at the same time, instead of one-by-one (helpful to avoid reopening the same files for each recipient).
 - File Management: create a new contacts file, edit existing contacts, including adding or removing API keys, encrypt or decrypt the contacts file.
-- Command-line interface with common arguments style. #need to create new
+- Command-line interface with common arguments style. #need to create a new script to parse args and provide to inner script logic
 - Some basic file protection and file integrity check.
 
 
