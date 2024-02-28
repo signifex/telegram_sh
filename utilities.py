@@ -159,36 +159,6 @@ class _CallableClassMeta(type):
         return cls.__class_call_method(*args, **kwargs)
 
 
-class Checkers:
-    """
-    global checkers...
-
-    to make sure, thats all part of the script will work as needed
-    """
-    class ApiKeyCheckError(ModuleBaseException):
-        def __init__(self, *args, **kwargs):
-            super().__init__(*args, **kwargs,
-                             error_name="Check failed")
-
-    @classmethod
-    def check_api_key(cls, api_key_value: str) -> NoReturn:
-
-        url = f"https://api.telegram.org/bot{api_key_value}/getMe"
-
-        try:
-            response = urllib.request.urlopen(url)
-            data = json.load(response)
-
-            if not data["ok"]:
-                raise cls.ApiKeyCheckError("API-key's check failed")
-
-        except (urllib.error.URLError, urllib.error.HTTPError) as e:
-            raise cls.ApiKeyCheckError(e) from e
-
-        finally:
-            logger.info("API-key's check passed")
-
-
 class _TimeStamp:
 
     @staticmethod
@@ -245,7 +215,7 @@ class _MessageFormater:
         return self
 
     @property
-    def colorized_text(self):
+    def formated_text(self):
         """
         main method to create a colored sting
         (if possible)
@@ -279,6 +249,36 @@ class _MessageFormater:
 
 
 class _Utilities:
+
+    class ApiKeyCheckError(ModuleBaseException):
+        """
+        error to indicate, that api check failed
+        """
+        def __init__(self, *args, **kwargs):
+            super().__init__(error_title="Check failed",
+                             *args, **kwargs)
+
+    @classmethod
+    def check_api_key(cls, api_key_value: str) -> NoReturn:
+        """
+        check, that api pey works as expected
+        TODO: remake to http.client, make better try-except block
+        """
+        url = f"https://api.telegram.org/bot{api_key_value}/getMe"
+
+        try:
+            response = urllib.request.urlopen(url)
+            data = json.load(response)
+
+            if not data["ok"]:
+                raise cls.ApiKeyCheckError("API-key's check failed")
+
+        except (urllib.error.URLError, urllib.error.HTTPError) as e:
+            raise cls.ApiKeyCheckError(e) from e
+
+        finally:
+            logger.info("API-key's check passed")
+
 
     @staticmethod
     def format_bytes(size: int) -> str:

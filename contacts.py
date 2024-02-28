@@ -4,10 +4,11 @@ import os
 import ctypes
 import pprint
 
+from dataclasses import dataclass
 from typing import List, Dict, Union, Iterable, Optional, NoReturn
 
 from . import logger
-from .utilities import ModuleBaseException, _CallableClassMeta, Checkers
+from .utilities import ModuleBaseException, _CallableClassMeta, _Utilities
 from .dispatcher import Dispatcher
 
 
@@ -33,15 +34,18 @@ class _BaseContactsClass:
 
     class FileSavingError(ModuleBaseException):
         def __init__(self, *args, **kwargs):
-            super().__init__(error_title="File not saved", *args, **kwargs)
+            super().__init__(error_title="File not saved",
+                             *args, **kwargs)
 
     class FileLoadingError(ModuleBaseException):
         def __init__(self, *args, **kwargs):
-            super().__init__(error_title="File not loaded", *args, **kwargs)
+            super().__init__(error_title="File not loaded",
+                             *args, **kwargs)
 
     class FileCorruptedError(ModuleBaseException):
         def __init__(self, *args, **kwargs):
-            super().__init__(error_title="File corrupted", *args, **kwargs)
+            super().__init__(error_title="File corrupted",
+                             *args, **kwargs)
 
     class ReservedValueError(ModuleBaseException):
         def __init__(self, *args, **kwargs):
@@ -219,7 +223,7 @@ class ContactsGet(_BaseContactsClass,
                   metaclass=_CallableClassMeta,
                   class_call_method="_get_updates"):
 
-    # @dataclass
+    @dataclass
     class Message:
         chat_id: int
         username: str
@@ -251,8 +255,7 @@ class ContactsGet(_BaseContactsClass,
         else:
             api_key = manual_api_key
 
-        Checkers.check_api_key(api_key)
-
+        _Utilities.check_api_key(api_key)
 
     # def _get_updates(api_key: str) -> List:
 
@@ -304,10 +307,11 @@ class ContactsGet(_BaseContactsClass,
             Message(message.chat_id, username, first_name, text).
 
             '''
-            formated_messages_dict[chat_id] = cls.Message(chat_id=chat_id,
-                                                          username=username,
-                                                          first_name=first_name,
-                                                          text=text)
+            formated_messages_dict[chat_id] = cls.Message(
+                chat_id=chat_id,
+                username=username,
+                first_name=first_name,
+                text=text)
 
         formated_messages = [formated_messages_dict.values()]
 
@@ -338,11 +342,15 @@ class ContactsGet(_BaseContactsClass,
                 continue
 
             elif filter_text is not None and message.text != filter_text:
-                logger.info(f"{message.text} from {message.username} ({message.chat_id}) not matches to {filter_text}")
+                logger.info(f"{message.text} from {message.username} "
+                            f"({message.chat_id}) not matches to "
+                            f"{filter_text}")
                 continue
 
-            elif filter_username is not None and message.username not in (filter_username, "NOUSERNAME"):
-                logger.info(f"{message.username}({message.chat_id}) not matches to {filter_username}")
+            elif filter_username is not None and message.username \
+                    not in (filter_username, "NOUSERNAME"):
+                logger.info(f"{message.username} ({message.chat_id}) "
+                            "not matches to {filter_username}")
                 continue
 
             else:
@@ -352,13 +360,14 @@ class ContactsGet(_BaseContactsClass,
 
         return filtered_messages
 
-
-    def _check_messages(messages: list[Message], existing_contacts: Dict[str, int]) -> NoReturn:
+    def _check_messages(messages: list[Message],
+                        existing_contacts: Dict[str, int]) -> NoReturn:
 
         logger.info("starting checking of messages")
 
         existing_contacts = existing_contacts.copy()
 
+        # TODO: make the output via _MessageFormater
         c_message = Colorize(text = f"There are {len(messages)} contacts to check", color = "green")
         print(c_message)
 
@@ -367,10 +376,13 @@ class ContactsGet(_BaseContactsClass,
             chat_id = message.chat_id
             username = message.username
             full_text = message.text
-            text = (full_text[:50] + "...") if len(full_text) > 50 else full_text
+            text = (full_text[:50] + "...") \
+                if len(full_text) > 50 else full_text
 
             if chat_id in existing_contacts.values():
-                existing_username = next(key for key, value in existing_contacts.items() if value == chat_id)
+                existing_username = next(key for key, value
+                                         in existing_contacts.items()
+                                         if value == chat_id)
                 c_message = Colorize(text=f"'{username}' already saved in contacts file as '{existing_username}', skipped", color="yellow")
                 print(c_message)
                 messages.remove(message)
@@ -454,31 +466,31 @@ class ContactsCopy(_BaseContactsClass):
     def decrypt(cls,
                 file_path: Optional[str] = None,
                 force_mode: Optional[bool] = False,
-                **kwargs)-> NoReturn:
+                **kwargs) -> NoReturn:
 
         contact_file = cls._load_contacts_file(**kwargs)
 
         mode = "w" if force_mode else "x"
 
-        file_path = os.path.join(cls._MODULE_DIRECTORY, "tgsend.contacts.decrypted") if not file_path else file_path
+        file_path = file_path if file_path \
+            else os.path.join(cls._MODULE_DIRECTORY,
+                              "tgsend.contacts.decrypted")
 
         logger.info(f"File's path will be: {file_path}")
 
         try:
 
-            with open(file_path, mode = mode) as copy:
-                json.dump(contact_file, copy, indent = 4)
+            with open(file_path, mode=mode) as copy:
+                json.dump(contact_file, copy, indent=4)
 
             logger.info("Decryption successfully proceeded")
 
         except FileExistsError as e:
-            error_message = f"File '{file_path}' already exists. "\
-                "Use force mode to overwrite."
-            logger.error(error_message)
-            raise cls.DecryptionError(e, error_message = error_message) from e
+            error_message = (f"File '{file_path}' already exists. "
+                             "Use force mode to overwrite.")
+            raise cls.DecryptionError(e, error_message=error_message) from e
 
         except (PermissionError, IOError) as e:
-            logger.error(e)
             raise cls.DecryptionError(e) from e
 
 

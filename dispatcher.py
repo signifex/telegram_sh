@@ -1,5 +1,10 @@
-# internet shit
+"""
+Main part of this module
 
+Dispatcher settings - collects all settings of the dispatcher
+Dispatcher - dispatches messages and files to recipeints
+"""
+# internet shit
 import http.client
 import json
 import socket
@@ -22,8 +27,7 @@ from . import logger
 from .utilities import (ModuleBaseException,
                         _TimeStamp,
                         _Utilities,
-                        _MessageFormater,
-                        Checkers)
+                        _MessageFormater)
 
 
 @dataclass(slots=True)
@@ -56,7 +60,7 @@ class Dispatcher:
             error_title = "This amount of files is not able to this "\
                     "sending method"
             super().__init__(error_title=error_title,
-                             *args, **kwargs )
+                             *args, **kwargs)
 
     class FilesTypeError(ModuleBaseException):
         """
@@ -172,7 +176,7 @@ class Dispatcher:
                  settings: Optional[DispatcherSettings] = None,
                  **kwargs):
 
-        Checkers.check_api_key(api_key_value)
+        _Utilities.check_api_key(api_key_value)
 
         if not all(isinstance(key, int) for key in recipients.keys()):
             error_message = "All recipeints must be represented " \
@@ -187,6 +191,8 @@ class Dispatcher:
             error_message = "Max len is 64 chars for values in recipients dict"
             raise self.DispatcherInitializationError(
                 error_message=error_message)
+
+        logger.debug("recipeints check passed")
 
         self.__url_bot = f"/bot{api_key_value}/"
         self.__thread_lock = threading.Lock()
@@ -203,6 +209,8 @@ class Dispatcher:
             extra_return=kwargs.get("extra_return", False),
             use_colorize=kwargs.get("use_colorize", True)
             )
+
+        logger.debug("dispatcher created")
 
     def __repr__(self) -> str:
         message_formater = _MessageFormater(
@@ -233,7 +241,7 @@ class Dispatcher:
                 .add_text(f"{attr_value}\n", bold=True,
                           color="green" if attr_value else "red")
 
-        return message_formater.colorized_text
+        return message_formater.formated_text
 
     @property
     def _num_recipients(self):
@@ -262,11 +270,7 @@ class Dispatcher:
         # with ThreadPoolExecutor() as executor:
         #    2 futures = [executor.submit(self._execute_message_send,
         #                                recipient,
-        #                                message,
-        #                                self._logs,
-        #                                self.print_status,
-        #                                self.__message_formater_args,
-        #                                self.__thread_lock)
+        #                                message)
         #                for recipient in self._recipients.items()]
 
         # for future in futures:
@@ -343,7 +347,7 @@ class Dispatcher:
             with self.__thread_lock:
                 self._logs.append(message_formater.raw_text)
                 if self.settings.print_status:
-                    print(message_formater.colorized_text)
+                    print(message_formater.formated_text)
 
     def send_file(self,
                   files: Union[str, List[str], BytesIO, List[BytesIO]],
@@ -352,16 +356,16 @@ class Dispatcher:
         if files_type not in self._METHODS:
             raise ValueError
 
-        if isinstance(files, str) or isinstance(files, BytesIO):
+        if isinstance(files, (str, BytesIO)):
             files = [files]
-            print("switched to list")
+            print("debug: switched to list")
 
         checked_files, mime_types = self._check_files(files_list=files,
                                                       files_type=files_type)
 
         print("files checked")
 
-        request_url = self.__base_url + self._METHODS[files_type]["api_method"]
+        request_url = self.__url_base + self._METHODS[files_type]["api_method"]
 
         request_body, request_headers = self._create_request_body(
             files_list=checked_files,
@@ -454,7 +458,7 @@ class Dispatcher:
                                for key, value in invalid_files.items()]
 
                 error_message = "\n\t" + "\n\t".join(errors_list)
-                if self.skip_invalid_files:
+                if self.settings.skip_invalid_files:
                     print(error_message)
                 else:
                     raise self.FileProcessingError(
@@ -511,7 +515,7 @@ class Dispatcher:
                     files_list) -> bytearray:
         pass
 
-    def create_initial_body_part(self, chat_id, boundary, filename):
+    def _create_initial_body_part(self, chat_id, boundary, filename):
         return (
             f"--{boundary}\r\n"
             f"Content-Disposition: form-data; name=\"chat_id\"\r\n\r\n"
@@ -521,17 +525,20 @@ class Dispatcher:
             f"Content-Type: application/octet-stream\r\n\r\n"
         ).encode('utf-8')
 
-    def create_final_body_part(self, boundary):
+    def _create_final_body_part(self, boundary):
         return f"\r\n--{boundary}--\r\n".encode('utf-8')
 
     def send_file_to_telegram(self, chat_id, file_path, bot_token):
-
+        """
+        send file to telegram bot to dispatcher recipients.
+        """
         boundary = '----WebKitFormBoundary' + str(uuid.uuid4()).replace('-', '')
         filename = file_path.split('/')[-1]
 
-        initial_part = self.create_initial_body_part(chat_id,
-                                                     boundary, filename)
-        final_part = self.create_final_body_part(boundary)
+        initial_part = self._create_initial_body_part(
+            chat_id, boundary, filename)
+
+        final_part = self._create_final_body_part(boundary)
 
         host = "api.telegram.org"
         method_url = f"/bot{bot_token}/sendDocument"
@@ -566,106 +573,3 @@ class Dispatcher:
         print(data)
 
         connection.close()
-
-
-    # bot_token = os.getenv("tg_lazy_bot")
-    # chat_id = os.getenv("chat_ing")
-    # file_path = 'examples/example.png'
-
-    # chat_ids = [chat_id, chat_id]  # List of chat IDs
-
-    # for chat_id in chat_ids:
-    #     send_file_to_telegram(chat_id, file_path, bot_token)
-
-    # def _check_files(self, file_paths: List[str], sending_method) -> Tuple[List[str], List[str]]:
-
-    #     checked_files = []
-    #     mime_types = []
-    #     invalid_files = {}
-    #     max_file_size = self._METHODS[sending_method]["max_file_size"]
-    #     allowed_mime_types = self._METHODS[sending_method]["mime_types"]
-
-    #     for file_path in file_paths:
-
-    #         if not os.path.exists(file_path):
-    #             invalid_files[file_path] = "File not found"
-    #         elif not os.path.isfile(file_path):
-    #             invalid_files[file_path] = "Not a file"
-    #         elif os.path.getsize(file_path) == 0:
-    #             invalid_files[file_path] = "File must be not empty"
-    #         elif os.path.getsize(file_path) > max_file_size:
-    #             readable_size = _Utilities.format_bytes(os.path.getsize(file_path))
-    #             invalid_files[file_path] = f"File must be less than {max_file_size} bytes, this file is {readable_size}"
-
-    #         else:
-    #             mime_type, _ = mimetypes.guess_type(file_path)
-    #             if mime_type is None and sending_method != "document":
-    #                 invalid_files[file_path] = "Cannot determine MIME type"
-    #             elif mime_type not in allowed_mime_types:
-    #                 invalid_files[file_path] = f"File type {mime_type} is not allowed by Telegram for {sending_method}"
-    #             else:
-    #                 mime_types.append(mime_type)
-    #                 checked_files.append(file_path)
-
-    #     if invalid_files:
-    #         error_message = "\n\t" + "\n\t".join([f"{key}: {value}" for key, value in invalid_files.items()])
-    #         raise self.FileProcessingError(error_message=error_message)
-
-    #     return checked_files, mime_types
-
-
-    # def _sync_file_handler(self,
-    #                        packets: List[str],
-    #                        as_doc: bool = False,
-    #                        caption: Optional[str] = None
-    #                        ) -> str:
-
-    #     if packet_type == "audiofiles":
-    #         url = f"https://api.telegram.org/bot{self.api_key_value}/sendAudio"
-
-    #     else:
-    #         url = f"https://api.telegram.org/bot{self.api_key_value}/sendDocument"
-
-    #     open_files = [("document", open(packet, "rb")) for packet in packets]
-
-    #     tasks = [self._files_dispatcher(url, open_files, recipient_id, recipient_name, caption)
-    #              for recipient_id, recipient_name in self.recipients.items()
-    #              ]
-
-
-
-    # async def _files_dispatcher(self,
-    #                             url: str,
-    #                             open_files: List[BinaryIO],
-    #                             recipient_id: int,
-    #                             recipient_name: str,
-    #                             caption: Optional[str]
-    #                             ) -> NoReturn:
-
-    #     data = {"chat_id": recipient_id}
-
-    #     if caption:
-    #         data["caption"] = caption
-
-    #     response = await requests.post(url, data = data, files = open_files)
-
-    #     key = Utilities.key_timestamp()
-
-    #     if response.status_code == 200:
-    #        self._sending_success[key] =  f"recipient: {recipient_id}/{recipient_name}"
-
-    #     else:
-    #        description = f"recipient: {recipient_id}/{recipient_name}\n" + str(json.loads(response.content)["description"])
-    #        self._sending_errors[key] = description
-
-
-
-    # def send_audiofiles(self, packets: List[str]) -> str:
-
-    #     cls.check_audiofiles(packets = packets)
-
-    #     checksum = len(self.recipients) * len(packets)
-
-    #     asyncio.run(self._file_handler(packets = packets, p_type = "audiofiles"))
-
-    #     return SendingStatus(success = self._sending_success, fail = self._sending_errors, checksum = checksum)
