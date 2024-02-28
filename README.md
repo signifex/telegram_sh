@@ -40,6 +40,9 @@ current usage in Python interpreter:
 
 as logger:
 
-![image](https://github.com/signifex/telegram_sh/assets/97762325/f643da13-654f-41e2-92e4-3dadb7186b0a)
-![image](https://github.com/signifex/telegram_sh/assets/97762325/4ff711ea-148e-4133-a91a-12e670de9840)
+![image](https://github.com/signifex/telegram_sh/assets/97762325/7acd6eb1-9fb4-49ec-9886-adf66e6d435d)
+
+![image](https://github.com/signifex/telegram_sh/assets/97762325/2a86ec04-3ed1-4947-908d-524efe5c4cf9)
+
+![image](https://github.com/signifex/telegram_sh/assets/97762325/d32cea76-aedf-4390-b477-853a0b03fff7)
 
